@@ -12,7 +12,6 @@ impl ReliableMessage {
     pub fn new(id: u32, message: &[u8]) -> Self {
         let len = message.len();
 
-        // Is rust a real language? How the fuck do I initialize the struct without this unnecessary variable?
         let mut new_message: [u8; MAX_PACKET_SIZE] = [0; MAX_PACKET_SIZE];
         new_message[..len].copy_from_slice(&message);
 
@@ -63,10 +62,7 @@ pub struct PacketSequencer {
 impl Iterator for PacketSequencer {
     type Item = Packet;
 
-    // This will produce raw packets that should be sent.
     fn next(&mut self) -> Option<Self::Item> {
-        // TODO: Go through reliable sent and determine if we should resend.
-
         if let Some(outbound_chunked) = &mut self.outbound_chunked {
             if outbound_chunked.outbound_ids.len() < outbound_chunked.max_outbound {
                 outbound_chunked.max_outbound += 1;
@@ -127,6 +123,12 @@ impl PacketSequencer {
         }
 
         None
+    }
+
+    pub fn handle_reliable_message(&mut self, id: u32, packet: &Packet) {
+        let reliable_message = ReliableMessage::new(id, &packet.data[..packet.size]);
+
+        self.reliable_queue.push(reliable_message);
     }
 
     pub fn handle_ack(&mut self, id: u32) {

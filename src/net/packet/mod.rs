@@ -1,6 +1,8 @@
 use crate::clock::{LocalTick, ServerTick};
 use std::fmt;
 
+pub mod c2s;
+pub mod s2c;
 pub mod sequencer;
 
 pub const MAX_PACKET_SIZE: usize = 520;
@@ -129,6 +131,26 @@ impl Packet {
         result
     }
 
+    pub fn concat_str(self, val: &str) -> Self {
+        let mut result = Self {
+            data: self.data,
+            size: self.size + val.len(),
+        };
+
+        result.data[self.size..self.size + val.len()].copy_from_slice(val.as_bytes());
+        result
+    }
+
+    pub fn concat_bytes(self, val: &[u8]) -> Self {
+        let mut result = Self {
+            data: self.data,
+            size: self.size + val.len(),
+        };
+
+        result.data[self.size..self.size + val.len()].copy_from_slice(val);
+        result
+    }
+
     pub fn write_u8(&mut self, val: u8) {
         self.data[self.size] = val;
         self.size += 1;
@@ -159,6 +181,16 @@ impl Packet {
         self.size += 4;
     }
 
+    pub fn write_str(&mut self, val: &str) {
+        self.data[self.size..self.size + val.len()].copy_from_slice(val.as_bytes());
+        self.size += val.len();
+    }
+
+    pub fn write_bytes(&mut self, val: &[u8]) {
+        self.data[self.size..self.size + val.len()].copy_from_slice(val);
+        self.size += val.len();
+    }
+
     pub fn remaining(&self) -> usize {
         MAX_PACKET_SIZE - self.size
     }
@@ -173,4 +205,8 @@ impl fmt::Debug for Packet {
             self.size
         )
     }
+}
+
+pub trait Serialize {
+    fn serialize(&self) -> Packet;
 }
