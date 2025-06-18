@@ -1,3 +1,4 @@
+use crate::arena_settings::ArenaSettings;
 use crate::clock::{LocalTick, ServerTick};
 use crate::net::packet::Packet;
 use crate::net::packet::bi::*;
@@ -38,7 +39,7 @@ pub enum GameServerMessage {
     Voice,                                     // 0x0C
     PlayerFrequencyChange,                     // 0x0D
     TurretLinkCreate,                          // 0x0E
-    ArenaSettings,                             // 0x0F
+    ArenaSettings(Box<ArenaSettings>),         // 0x0F
     FileTransfer,                              // 0x10
     Unknown11,                                 // 0x11
     FlagPosition,                              // 0x12
@@ -422,7 +423,13 @@ impl ServerMessage {
                 )));
             }
             0x0F => {
-                return Ok(Some(ServerMessage::Game(GameServerMessage::ArenaSettings)));
+                let settings = ArenaSettings::parse(packet);
+                if let None = settings {
+                    return Err(anyhow!("invalid arena settings packet"));
+                }
+                return Ok(Some(ServerMessage::Game(GameServerMessage::ArenaSettings(
+                    Box::new(settings.unwrap()),
+                ))));
             }
             0x10 => {
                 return Ok(Some(ServerMessage::Game(GameServerMessage::FileTransfer)));

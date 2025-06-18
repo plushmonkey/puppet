@@ -5,6 +5,7 @@ use crate::net::packet::c2s::*;
 use crate::net::packet::s2c::*;
 use crate::ship::Ship;
 
+pub mod arena_settings;
 pub mod clock;
 pub mod net;
 pub mod ship;
@@ -68,8 +69,9 @@ fn main() -> anyhow::Result<()> {
 
                         connection.send(&arena_request)?;
                     }
-                    GameServerMessage::ArenaSettings => {
-                        println!("Received arena settings.");
+                    GameServerMessage::ArenaSettings(settings) => {
+                        println!("Received arena settings:");
+                        println!("{:?}", settings);
                     }
                     _ => {}
                 },

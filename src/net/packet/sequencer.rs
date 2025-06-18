@@ -122,11 +122,13 @@ impl PacketSequencer {
     }
 
     pub fn handle_small_chunk_body(&mut self, packet: &Packet) {
-        self.chunk_data.extend(packet.data.iter());
+        let data = &packet.data[..packet.size];
+        self.chunk_data.extend(data.iter());
     }
 
     pub fn handle_small_chunk_tail(&mut self, packet: &Packet) {
-        self.chunk_data.extend(packet.data.iter());
+        let data = &packet.data[..packet.size];
+        self.chunk_data.extend(data.iter());
         self.process_queue.push(self.chunk_data.clone());
         self.chunk_data.clear();
     }
