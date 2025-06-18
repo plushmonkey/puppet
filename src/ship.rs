@@ -1,5 +1,6 @@
+#[derive(Copy, Clone, Debug)]
 pub enum Ship {
-    Warbird,
+    Warbird = 1,
     Javelin,
     Spider,
     Leviathan,
@@ -11,17 +12,22 @@ pub enum Ship {
 }
 
 impl Ship {
-    pub fn value(&self) -> u8 {
-        match self {
-            Ship::Warbird => 0,
-            Ship::Javelin => 1,
-            Ship::Spider => 2,
-            Ship::Leviathan => 3,
-            Ship::Terrier => 4,
-            Ship::Weasel => 5,
-            Ship::Lancaster => 6,
-            Ship::Shark => 7,
-            Ship::Spectator => 8,
+    pub fn network_value(&self) -> u8 {
+        *self as u8 - 1
+    }
+
+    pub fn from_network_value(v: u8) -> Ship {
+        match v {
+            0 => Ship::Warbird,
+            1 => Ship::Javelin,
+            2 => Ship::Spider,
+            3 => Ship::Leviathan,
+            4 => Ship::Terrier,
+            5 => Ship::Weasel,
+            6 => Ship::Lancaster,
+            7 => Ship::Shark,
+            8 => Ship::Spectator,
+            _ => Ship::Spectator,
         }
     }
 }

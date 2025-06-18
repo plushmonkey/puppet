@@ -1,8 +1,9 @@
 use std::cmp::{Ord, Ordering, PartialOrd};
 use std::convert::From;
+use std::ops::{Add, Sub};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Copy, Clone)]
 pub struct LocalTick {
     value: u32,
 }
@@ -33,6 +34,26 @@ impl LocalTick {
         let b_value = (other.value << 1) as i32;
 
         (a_value - b_value) >> 1
+    }
+}
+
+impl Add<i32> for LocalTick {
+    type Output = Self;
+
+    fn add(self, rhs: i32) -> Self::Output {
+        let v = self.value() as i32;
+        let new_v = v.wrapping_add(rhs) as u32;
+        LocalTick::new(new_v)
+    }
+}
+
+impl Sub<i32> for LocalTick {
+    type Output = Self;
+
+    fn sub(self, rhs: i32) -> Self::Output {
+        let v = self.value() as i32;
+        let new_v = v.wrapping_sub(rhs) as u32;
+        LocalTick::new(new_v)
     }
 }
 
@@ -107,23 +128,25 @@ impl From<u32> for LocalTick {
     }
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Copy, Clone)]
 pub struct ServerTick {
     value: u32,
 }
 
 impl ServerTick {
-    pub fn now() -> Self {
+    pub fn now(offset: i32) -> Self {
         let tick: u128 = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("Now must be later than unix epoch")
             .as_millis();
         let tick = (tick / 10) as u32;
 
-        Self::new(tick)
+        Self::new(tick, offset)
     }
 
-    pub fn new(value: u32) -> Self {
+    pub fn new(value: u32, offset: i32) -> Self {
+        let v = value as i32;
+        let value = v.wrapping_add(offset) as u32;
         Self {
             value: value & 0x7FFFFFFF,
         }
@@ -208,6 +231,26 @@ impl Ord for ServerTick {
 
 impl From<u32> for ServerTick {
     fn from(value: u32) -> Self {
-        Self::new(value)
+        Self::new(value, 0)
+    }
+}
+
+impl Add<i32> for ServerTick {
+    type Output = Self;
+
+    fn add(self, rhs: i32) -> Self::Output {
+        let v = self.value() as i32;
+        let new_v = v.wrapping_add(rhs) as u32;
+        ServerTick::new(new_v, 0)
+    }
+}
+
+impl Sub<i32> for ServerTick {
+    type Output = Self;
+
+    fn sub(self, rhs: i32) -> Self::Output {
+        let v = self.value() as i32;
+        let new_v = v.wrapping_sub(rhs) as u32;
+        ServerTick::new(new_v, 0)
     }
 }

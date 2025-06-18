@@ -1,5 +1,8 @@
 use crate::clock::LocalTick;
+use crate::net::packet::bi::{ClusterMessage, HugeChunkMessage};
+use crate::net::packet::s2c::ServerMessage;
 use crate::net::packet::{MAX_PACKET_SIZE, Packet};
+use anyhow::Result;
 
 pub struct ReliableMessage {
     pub id: u32,
@@ -24,79 +27,14 @@ impl ReliableMessage {
     }
 }
 
-pub struct OutboundChunkedPacket {
-    data: Vec<u8>,
-    index: usize,
-
-    max_outbound: usize,
-    // This is the list of outbound ids that we are waiting for acks on.
-    // When we are sending the huge message, we want to wait for acks to come in before
-    // continuing to send more, so we only have a limited number of outbound reliables.
-    outbound_ids: Vec<u32>,
-}
-
-impl OutboundChunkedPacket {
-    pub fn new(message: &[u8], max_outbound: usize) -> Self {
-        Self {
-            data: message.to_vec(),
-            index: 0,
-            max_outbound,
-            outbound_ids: Vec::new(),
-        }
-    }
-
-    pub fn get_remaining(&self) -> usize {
-        self.data.len() - self.index
-    }
-}
-
 pub struct PacketSequencer {
     pub next_process_id: u32,
     pub next_reliable_gen_id: u32,
     pub reliable_sent: Vec<ReliableMessage>,
     pub reliable_queue: Vec<ReliableMessage>,
-
-    pub outbound_chunked: Option<OutboundChunkedPacket>,
-}
-
-impl Iterator for PacketSequencer {
-    type Item = Packet;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some(outbound_chunked) = &mut self.outbound_chunked {
-            if outbound_chunked.outbound_ids.len() < outbound_chunked.max_outbound {
-                outbound_chunked.max_outbound += 1;
-
-                let header_size = 6;
-
-                let mut size = outbound_chunked.get_remaining();
-                if size > MAX_PACKET_SIZE - header_size {
-                    size = MAX_PACKET_SIZE - header_size;
-                }
-
-                let mut data = [0; MAX_PACKET_SIZE];
-
-                data[0] = 0x00;
-                data[1] = 0x0A;
-                data[2..6].copy_from_slice(&(size as u32).to_le_bytes());
-                data[6..size + 6].copy_from_slice(
-                    &outbound_chunked.data[outbound_chunked.index..outbound_chunked.index + size],
-                );
-
-                outbound_chunked.index += size;
-
-                if outbound_chunked.get_remaining() == 0 {
-                    self.outbound_chunked = None;
-                }
-
-                return Some(Packet::new(&data[..size]));
-            }
-
-            self.outbound_chunked = None;
-        }
-
-        None
-    }
+    // This queue stores clustered packets and coalesced packets such as small and huge chunks.
+    pub process_queue: Vec<Vec<u8>>,
+    pub chunk_data: Vec<u8>,
 }
 
 impl PacketSequencer {
@@ -106,12 +44,36 @@ impl PacketSequencer {
             next_reliable_gen_id: 0,
             reliable_sent: Vec::new(),
             reliable_queue: Vec::new(),
-
-            outbound_chunked: None,
+            process_queue: Vec::new(),
+            chunk_data: Vec::new(),
         }
     }
 
-    pub fn pop_process_queue(&mut self) -> Option<ReliableMessage> {
+    pub fn tick(&mut self) -> Option<Packet> {
+        const RESEND_DELAY: i32 = 300;
+
+        let now = LocalTick::now();
+        let resend_timestamp = now - RESEND_DELAY;
+
+        // Find the first message that needs to be resent.
+        if let Some(rel) = self
+            .reliable_sent
+            .iter_mut()
+            .find(|msg| msg.timestamp.le(&resend_timestamp))
+        {
+            rel.timestamp = now;
+            return Some(Packet::new(&rel.message[..rel.size]));
+        }
+        None
+    }
+
+    pub fn push_reliable_sent(&mut self, id: u32, message: &[u8]) {
+        let reliable = ReliableMessage::new(id, message);
+        self.reliable_sent.push(reliable);
+    }
+
+    pub fn pop_process_queue(&mut self) -> Result<Option<ServerMessage>> {
+        // First try to find the next reliable message to process.
         if let Some(index) = self
             .reliable_queue
             .iter()
@@ -119,10 +81,16 @@ impl PacketSequencer {
         {
             self.next_process_id = self.next_process_id.wrapping_add(1);
 
-            return Some(self.reliable_queue.swap_remove(index));
+            let rel = self.reliable_queue.swap_remove(index);
+            return ServerMessage::parse(&rel.message[..rel.size]);
         }
 
-        None
+        // Process the queue if we have no reliable messages to process.
+        if let Some(data) = self.process_queue.pop() {
+            return ServerMessage::parse(&data[..]);
+        }
+
+        Ok(None)
     }
 
     pub fn handle_reliable_message(&mut self, id: u32, packet: &Packet) {
@@ -134,17 +102,47 @@ impl PacketSequencer {
     pub fn handle_ack(&mut self, id: u32) {
         if let Some(index) = self.reliable_sent.iter().position(|msg| msg.id == id) {
             self.reliable_sent.swap_remove(index);
-
-            if let Some(outbound_chunked) = &mut self.outbound_chunked {
-                if let Some(index) = outbound_chunked
-                    .outbound_ids
-                    .iter()
-                    .position(|outbound_id| *outbound_id == id)
-                {
-                    outbound_chunked.outbound_ids.swap_remove(index);
-                }
-            }
         }
+    }
+
+    pub fn handle_cluster(&mut self, cluster: &ClusterMessage) {
+        let mut data = &cluster.data.data[..cluster.data.size];
+
+        while !data.is_empty() {
+            let size = data[0] as usize;
+            let current_data = &data[1..size + 1];
+
+            let mut process_data = Vec::new();
+            process_data.extend(current_data.iter());
+
+            self.process_queue.push(process_data);
+
+            data = &data[size + 1..];
+        }
+    }
+
+    pub fn handle_small_chunk_body(&mut self, packet: &Packet) {
+        self.chunk_data.extend(packet.data.iter());
+    }
+
+    pub fn handle_small_chunk_tail(&mut self, packet: &Packet) {
+        self.chunk_data.extend(packet.data.iter());
+        self.process_queue.push(self.chunk_data.clone());
+        self.chunk_data.clear();
+    }
+
+    pub fn handle_huge_chunk(&mut self, chunk: &HugeChunkMessage) {
+        let data = &chunk.data.data[..chunk.data.size];
+        self.chunk_data.extend(data.iter());
+
+        if self.chunk_data.len() >= chunk.total_size as usize {
+            self.process_queue.push(self.chunk_data.clone());
+            self.chunk_data.clear();
+        }
+    }
+
+    pub fn handle_huge_chunk_cancel(&mut self) {
+        self.chunk_data.clear();
     }
 
     pub fn increment_id(&mut self) {

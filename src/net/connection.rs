@@ -1,6 +1,9 @@
+use crate::clock::*;
+use crate::net::packet::bi::HugeChunkCancelAckMessage;
+use crate::net::packet::bi::ReliableDataMessage;
 use crate::net::packet::s2c::*;
 use crate::net::packet::sequencer::*;
-use crate::net::packet::{Packet, Serialize};
+use crate::net::packet::{MAX_PACKET_SIZE, Packet, Serialize};
 
 use anyhow::{Result, anyhow};
 use std::{
@@ -23,6 +26,7 @@ pub struct Connection {
     pub socket: UdpSocket,
     pub state: ConnectionState,
     sequencer: PacketSequencer,
+    pub tick_diff: i32,
 }
 
 impl Connection {
@@ -38,7 +42,12 @@ impl Connection {
             socket,
             state: ConnectionState::Disconnected,
             sequencer: PacketSequencer::new(),
+            tick_diff: 0,
         })
+    }
+
+    pub fn get_server_tick(&self) -> ServerTick {
+        ServerTick::now(self.tick_diff)
     }
 
     pub fn send<T>(&self, message: &T) -> Result<()>
@@ -48,6 +57,13 @@ impl Connection {
         self.send_packet(&message.serialize())
     }
 
+    pub fn send_reliable<T>(&mut self, message: &T) -> Result<()>
+    where
+        T: Serialize,
+    {
+        self.send_reliable_packet(&message.serialize())
+    }
+
     pub fn send_packet(&self, packet: &Packet) -> Result<()> {
         if packet.size == 0 {
             return Err(anyhow!("packet must not be empty"));
@@ -55,7 +71,35 @@ impl Connection {
 
         let buf = packet.data();
 
-        println!("Sending {:?}", buf);
+        println!("Sending {:02x?}", buf);
+
+        self.socket.send_to(buf, &self.remote_addr)?;
+
+        Ok(())
+    }
+
+    pub fn send_reliable_packet(&mut self, packet: &Packet) -> Result<()> {
+        if packet.size == 0 {
+            return Err(anyhow!("reliable packet payload must not be empty"));
+        }
+        if packet.size + 6 > MAX_PACKET_SIZE {
+            return Err(anyhow!("reliable packet payload too large"));
+        }
+
+        let id = self.sequencer.next_reliable_gen_id;
+        self.sequencer.increment_id();
+
+        let reliable = ReliableDataMessage {
+            id,
+            data: packet.clone(),
+        };
+
+        let packet = reliable.serialize();
+        let buf = packet.data();
+
+        self.sequencer.push_reliable_sent(id, buf);
+
+        println!("Sending {:02x?}", buf);
 
         self.socket.send_to(buf, &self.remote_addr)?;
 
@@ -63,60 +107,93 @@ impl Connection {
     }
 
     pub fn tick(&mut self) -> Result<Option<ServerMessage>> {
+        if let Some(message) = self.sequencer.tick() {
+            self.send_packet(&message)?;
+        }
+
         let packet = self.recv_packet()?;
 
         // If we received a packet and it got processed into a complete message, return it.
         if let Some(packet) = packet {
-            let result = self.process_packet(&packet);
-
-            if let Ok(Some(_)) = result {
-                return result;
+            let result = ServerMessage::parse(&packet.data[..packet.size])?;
+            if let Some(message) = &result {
+                self.process_packet(&message);
             }
+
+            return Ok(result);
         }
 
-        // Grab the next reliable message off of the queue if possible.
-        if let Some(rel) = self.sequencer.pop_process_queue() {
-            let packet = Packet::new(&rel.message[..rel.size]);
-            return self.process_packet(&packet);
+        // Grab the next reliable message / cluster message off of the queue if possible.
+        let sequence_message = self.sequencer.pop_process_queue()?;
+
+        if let Some(message) = &sequence_message {
+            self.process_packet(&message);
+            return Ok(sequence_message);
         }
 
         Ok(None)
     }
 
-    fn process_packet(&mut self, packet: &Packet) -> Result<Option<ServerMessage>> {
-        let message = ServerMessage::parse(packet)?;
+    fn process_packet(&mut self, message: &ServerMessage) {
+        match message {
+            ServerMessage::Core(kind) => match kind {
+                CoreServerMessage::EncryptionResponse(_) => {
+                    //
+                }
+                CoreServerMessage::ReliableAck(ack) => {
+                    self.sequencer.handle_ack(ack.id);
+                    // println!("Got reliable ack {}", ack.id);
+                }
+                CoreServerMessage::ReliableData(rel) => {
+                    self.sequencer.handle_reliable_message(rel.id, &rel.data);
+                    // println!("Got reliable data {:?}", &rel.data.data[..rel.data.size]);
+                    let ack = Packet::empty()
+                        .concat_u8(0x00)
+                        .concat_u8(0x04)
+                        .concat_u32(rel.id);
+                    if let Err(e) = self.send_packet(&ack) {
+                        println!("Error: {}", e);
+                    }
+                }
+                CoreServerMessage::SyncResponse(sync) => {
+                    let server_timestamp = sync.server_timestamp.value() as i32;
+                    let current_timestamp = LocalTick::now().value() as i32;
+                    let rtt = current_timestamp - sync.request_timestamp.value() as i32;
 
-        if let Some(message) = &message {
-            match message {
-                ServerMessage::Core(kind) => match kind {
-                    CoreServerMessage::EncryptionResponse(_) => {
-                        //
+                    let current_time_diff = ((rtt * 3) / 5) + server_timestamp - current_timestamp;
+
+                    self.tick_diff = current_time_diff;
+                }
+                CoreServerMessage::Disconnect => {
+                    println!("Got disconnect order.");
+                    self.state = ConnectionState::Disconnected;
+                }
+                CoreServerMessage::SmallChunkBody(chunk) => {
+                    self.sequencer.handle_small_chunk_body(&chunk.data);
+                }
+                CoreServerMessage::SmallChunkTail(tail) => {
+                    self.sequencer.handle_small_chunk_tail(&tail.data);
+                }
+                CoreServerMessage::HugeChunk(chunk) => {
+                    self.sequencer.handle_huge_chunk(chunk);
+                }
+                CoreServerMessage::HugeChunkCancel => {
+                    self.sequencer.handle_huge_chunk_cancel();
+
+                    let cancel = HugeChunkCancelAckMessage {};
+                    if let Err(e) = self.send(&cancel) {
+                        println!("Error: {}", e);
                     }
-                    CoreServerMessage::ReliableAck(ack) => {
-                        self.sequencer.handle_ack(ack.id);
-                        println!("Got reliable ack {}", ack.id);
-                    }
-                    CoreServerMessage::ReliableData(rel) => {
-                        self.sequencer.handle_reliable_message(rel.id, &rel.data);
-                        println!("Got reliable data {:?}", &rel.data.data[..rel.data.size]);
-                        let ack = Packet::empty()
-                            .concat_u8(0x00)
-                            .concat_u8(0x04)
-                            .concat_u32(rel.id);
-                        if let Err(e) = self.send_packet(&ack) {
-                            println!("Error: {}", e);
-                        }
-                    }
-                    CoreServerMessage::Disconnect => {
-                        println!("Got disconnect order.");
-                        self.state = ConnectionState::Disconnected;
-                    }
-                },
-                _ => {}
-            }
+                }
+                CoreServerMessage::HugeChunkCancelAck => {
+                    //
+                }
+                CoreServerMessage::Cluster(cluster) => {
+                    self.sequencer.handle_cluster(cluster);
+                }
+            },
+            _ => {}
         }
-
-        return Ok(message);
     }
 
     fn recv_packet(&self) -> Result<Option<Packet>> {
@@ -134,6 +211,8 @@ impl Connection {
         };
 
         packet.size = size;
+
+        println!("Recv: {:02x?}", &packet.data[..size]);
 
         Ok(Some(packet))
     }

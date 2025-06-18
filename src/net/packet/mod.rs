@@ -1,6 +1,7 @@
 use crate::clock::{LocalTick, ServerTick};
 use std::fmt;
 
+pub mod bi;
 pub mod c2s;
 pub mod s2c;
 pub mod sequencer;

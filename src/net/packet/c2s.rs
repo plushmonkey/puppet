@@ -1,5 +1,8 @@
+use crate::clock::ServerTick;
 use crate::net::packet::{Packet, Serialize};
 use crate::ship::Ship;
+
+// Core packets
 
 pub enum EncryptionClientVersion {
     Subspace,
@@ -7,12 +10,12 @@ pub enum EncryptionClientVersion {
     Continuum,
 }
 
-pub struct EncryptionRequestPacket {
+pub struct EncryptionRequestMessage {
     pub key: u32,
     pub version: EncryptionClientVersion,
 }
 
-impl EncryptionRequestPacket {
+impl EncryptionRequestMessage {
     pub fn new(key: u32) -> Self {
         Self {
             key,
@@ -21,7 +24,7 @@ impl EncryptionRequestPacket {
     }
 }
 
-impl Serialize for EncryptionRequestPacket {
+impl Serialize for EncryptionRequestMessage {
     fn serialize(&self) -> Packet {
         let version = match &self.version {
             EncryptionClientVersion::Subspace => 0x01,
@@ -37,7 +40,113 @@ impl Serialize for EncryptionRequestPacket {
     }
 }
 
-pub struct PasswordPacket {
+// Game packets
+pub enum ArenaRequest {
+    AnyPublic,
+    SpecificPublic(u16),
+    Name([u8; 16]),
+}
+
+// 0x01
+pub struct ArenaJoinMessage {
+    pub ship: Ship,
+    pub resolution_x: u16,
+    pub resolution_y: u16,
+    pub arena_request: ArenaRequest,
+}
+
+impl ArenaJoinMessage {
+    pub fn new(
+        ship: Ship,
+        resolution_x: u16,
+        resolution_y: u16,
+        arena_request: ArenaRequest,
+    ) -> Self {
+        Self {
+            ship,
+            resolution_x,
+            resolution_y,
+            arena_request,
+        }
+    }
+}
+
+impl Serialize for ArenaJoinMessage {
+    fn serialize(&self) -> Packet {
+        let mut arena_number = 0xFFFF;
+        let mut arena_name = [0; 16];
+
+        match self.arena_request {
+            ArenaRequest::AnyPublic => {}
+            ArenaRequest::SpecificPublic(number) => {
+                arena_number = number;
+            }
+            ArenaRequest::Name(name) => {
+                if name.len() <= 16 {
+                    arena_name[..name.len()].copy_from_slice(&name);
+                    arena_number = 0xFFFD;
+                }
+            }
+        }
+
+        let ship = self.ship.network_value();
+
+        Packet::empty()
+            .concat_u8(0x01)
+            .concat_u8(ship)
+            .concat_u16(0x01) // Audio
+            .concat_u16(self.resolution_x)
+            .concat_u16(self.resolution_y)
+            .concat_u16(arena_number)
+            .concat_bytes(&arena_name)
+    }
+}
+
+// 0x03
+// TODO: Turn these into real types
+pub struct PositionMessage {
+    pub direction: u8,
+    pub timestamp: ServerTick,
+    pub x_position: u16,
+    pub y_position: u16,
+    pub x_velocity: i16,
+    pub y_velocity: i16,
+    pub togglables: u8,
+    pub bounty: u16,
+    pub energy: u16,
+    pub weapon_info: u16,
+}
+
+impl Serialize for PositionMessage {
+    fn serialize(&self) -> Packet {
+        let mut packet = Packet::empty()
+            .concat_u8(0x03)
+            .concat_u8(self.direction)
+            .concat_u32(self.timestamp.value())
+            .concat_i16(self.x_velocity)
+            .concat_u16(self.y_position)
+            .concat_u8(0x00) // Checksum
+            .concat_u8(self.togglables)
+            .concat_u16(self.x_position)
+            .concat_i16(self.y_velocity)
+            .concat_u16(self.bounty)
+            .concat_u16(self.energy)
+            .concat_u16(self.weapon_info);
+
+        let mut checksum: u8 = 0;
+
+        for v in &packet.data[..packet.size] {
+            checksum ^= v;
+        }
+
+        packet.data[10] = checksum;
+
+        packet
+    }
+}
+
+// 0x09
+pub struct PasswordMessage {
     pub new_user: bool,
     pub name: [u8; 32],
     pub password: [u8; 32],
@@ -47,7 +156,7 @@ pub struct PasswordPacket {
     pub permission_id: u32,
 }
 
-impl PasswordPacket {
+impl PasswordMessage {
     pub fn new(
         name: &str,
         password: &str,
@@ -75,7 +184,7 @@ impl PasswordPacket {
     }
 }
 
-impl Serialize for PasswordPacket {
+impl Serialize for PasswordMessage {
     fn serialize(&self) -> Packet {
         let new_user = if self.new_user { 1 } else { 0 };
         Packet::empty()
@@ -94,63 +203,5 @@ impl Serialize for PasswordPacket {
             .concat_u32(0x00)
             .concat_u32(0x00)
             .concat_u32(0x00)
-    }
-}
-
-pub enum ArenaRequest {
-    AnyPublic,
-    SpecificPublic(u16),
-    Name([u8; 16]),
-}
-
-pub struct ArenaJoinPacket {
-    pub ship: Ship,
-    pub resolution_x: u16,
-    pub resolution_y: u16,
-    pub arena_request: ArenaRequest,
-}
-
-impl ArenaJoinPacket {
-    pub fn new(
-        ship: Ship,
-        resolution_x: u16,
-        resolution_y: u16,
-        arena_request: ArenaRequest,
-    ) -> Self {
-        Self {
-            ship,
-            resolution_x,
-            resolution_y,
-            arena_request,
-        }
-    }
-}
-
-impl Serialize for ArenaJoinPacket {
-    fn serialize(&self) -> Packet {
-        let mut arena_number = 0xFFFF;
-        let mut arena_name = [0; 16];
-
-        match self.arena_request {
-            ArenaRequest::AnyPublic => {}
-            ArenaRequest::SpecificPublic(number) => {
-                arena_number = number;
-            }
-            ArenaRequest::Name(name) => {
-                if name.len() <= 16 {
-                    arena_name[..name.len()].copy_from_slice(&name);
-                    arena_number = 0xFFFD;
-                }
-            }
-        }
-
-        Packet::empty()
-            .concat_u8(0x01)
-            .concat_u8(self.ship.value())
-            .concat_u16(0x01) // Audio
-            .concat_u16(self.resolution_x)
-            .concat_u16(self.resolution_y)
-            .concat_u16(arena_number)
-            .concat_bytes(&arena_name)
     }
 }
