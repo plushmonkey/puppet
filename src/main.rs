@@ -1,18 +1,33 @@
 use crate::clock::*;
+use crate::map::Map;
 use crate::net::connection::{Connection, ConnectionState};
 use crate::net::packet::bi::*;
 use crate::net::packet::c2s::*;
 use crate::net::packet::s2c::*;
 use crate::ship::Ship;
 use ctrlc;
+use miniz_oxide::inflate::decompress_to_vec_zlib;
+use std::fs::{self, DirBuilder};
 use std::sync::mpsc::channel;
 
 pub mod arena_settings;
 pub mod checksum;
 pub mod clock;
+pub mod map;
 pub mod net;
 pub mod player;
 pub mod ship;
+
+fn build_zone_directory(zone: &str) -> anyhow::Result<()> {
+    DirBuilder::new()
+        .recursive(true)
+        .create(format!("zones/{}", zone))?;
+    Ok(())
+}
+
+fn get_zone_path(zone: &str, filename: &str) -> String {
+    format!("zones/{}/{}", zone, filename)
+}
 
 fn main() -> anyhow::Result<()> {
     let (tx, rx) = channel();
@@ -23,6 +38,7 @@ fn main() -> anyhow::Result<()> {
 
     let username = "test";
     let password = "none";
+    let zone = "local";
     let remote_ip = "127.0.0.1";
     let remote_port = 5000;
 
@@ -31,6 +47,8 @@ fn main() -> anyhow::Result<()> {
 
     let key = 0;
     let encrypt_request = EncryptionRequestMessage::new(key);
+
+    let mut map = Map::empty(0, "");
 
     connection.state = ConnectionState::EncryptionHandshake;
     connection.send(&encrypt_request)?;
@@ -100,12 +118,60 @@ fn main() -> anyhow::Result<()> {
                     }
                     GameServerMessage::MapInformation(info) => {
                         println!("Map name: {}", info.filename);
-                        // TODO: Check if we have the map and request if we don't.
-                        connection.state = ConnectionState::Playing;
+
+                        connection.state = ConnectionState::MapDownload;
 
                         let chat = SendChatMessage::public("?arena");
-
                         connection.send(&chat)?;
+
+                        let map_path = get_zone_path(zone, &info.filename);
+                        let map_data = fs::read(map_path);
+
+                        if let Ok(map_data) = map_data {
+                            let checksum = checksum::crc32(&map_data);
+
+                            if checksum == info.checksum {
+                                map = Map::new(info.checksum, &info.filename, &map_data);
+                                connection.state = ConnectionState::Playing;
+                            }
+                        } else if let Err(e) = map_data {
+                            println!("Map read error: {}", e);
+                        }
+
+                        if matches!(connection.state, ConnectionState::MapDownload) {
+                            // Request
+                            let map_request = MapRequestMessage {};
+                            connection.send(&map_request)?;
+
+                            connection.state = ConnectionState::MapDownload;
+
+                            map = Map::empty(info.checksum, &info.filename);
+                        }
+                    }
+                    GameServerMessage::CompressedMap(compressed) => {
+                        if compressed.filename == map.filename {
+                            let inflated = decompress_to_vec_zlib(compressed.data.as_slice());
+
+                            match inflated {
+                                Ok(inflated) => {
+                                    let map_path = get_zone_path(zone, &compressed.filename);
+
+                                    if let Err(e) = build_zone_directory(zone) {
+                                        println!("Error creating zone directory: {}", e);
+                                    }
+
+                                    if let Err(e) = fs::write(map_path, inflated.as_slice()) {
+                                        println!("Error writing map: {}", e);
+                                    }
+
+                                    map.data = inflated;
+                                }
+                                Err(e) => {
+                                    println!("Error: {}", e);
+                                    break;
+                                }
+                            }
+                        }
                     }
                     GameServerMessage::ArenaDirectory(directory) => {
                         println!("directory: {:?}", directory);

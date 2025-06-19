@@ -4,6 +4,7 @@ use crate::net::packet::Packet;
 use crate::net::packet::bi::*;
 use crate::ship::Ship;
 use anyhow::{Result, anyhow};
+use std::ffi::CStr;
 use std::fmt::{self, Debug};
 
 pub enum ServerMessage {
@@ -684,8 +685,8 @@ impl ServerMessage {
 
                 let mut data = packet;
                 while data.len() >= 64 {
-                    let name = std::str::from_utf8(&data[3..23])?;
-                    let squad = std::str::from_utf8(&data[23..43])?;
+                    let name = CStr::from_bytes_until_nul(&data[3..23])?.to_str()?;
+                    let squad = CStr::from_bytes_until_nul(&data[23..43])?.to_str()?;
 
                     let current = PlayerEntering {
                         ship: Ship::from_network_value(data[0]),
@@ -812,17 +813,7 @@ impl ServerMessage {
 
                 let sound = packet[2];
                 let sender = u16::from_le_bytes(packet[3..5].try_into().unwrap());
-                let message = std::str::from_utf8(&packet[5..]);
-                if let Err(e) = message {
-                    return Err(anyhow!(e));
-                }
-
-                let mut message = message.unwrap();
-
-                // Special case empty messages because asss sends an empty message if the enter message is empty.
-                if !message.is_empty() && message.as_bytes()[0] == 0 {
-                    message = "";
-                }
+                let message = CStr::from_bytes_until_nul(&packet[5..])?.to_str()?;
 
                 let chat = ChatMessage {
                     kind,
@@ -995,7 +986,7 @@ impl ServerMessage {
                     return Err(anyhow!("file transfer message was too small"));
                 }
 
-                let filename = std::str::from_utf8(&packet[1..17])?;
+                let filename = CStr::from_bytes_until_nul(&packet[1..17])?.to_str()?;
                 let data = packet[17..].to_vec();
 
                 let message = FileTransferMessage {
@@ -1107,8 +1098,8 @@ impl ServerMessage {
                     return Err(anyhow!("request file message was too small"));
                 }
 
-                let local_filename = std::str::from_utf8(&packet[1..257])?;
-                let remote_filename = std::str::from_utf8(&packet[257..274])?;
+                let local_filename = CStr::from_bytes_until_nul(&packet[1..257])?.to_str()?;
+                let remote_filename = CStr::from_bytes_until_nul(&packet[257..274])?.to_str()?;
 
                 let message = RequestFileMessage {
                     local_filename: local_filename.to_owned(),
@@ -1385,7 +1376,7 @@ impl ServerMessage {
                     return Err(anyhow!("map information message was too small"));
                 }
 
-                let filename = std::str::from_utf8(&packet[1..17])?;
+                let filename = CStr::from_bytes_until_nul(&packet[1..17])?.to_str()?;
                 let mut filesize = None;
 
                 if packet.len() >= 25 {
@@ -1407,7 +1398,7 @@ impl ServerMessage {
                     return Err(anyhow!("compressed map message was too small"));
                 }
 
-                let filename = std::str::from_utf8(&packet[1..17])?;
+                let filename = CStr::from_bytes_until_nul(&packet[1..17])?.to_str()?;
                 let data = packet[17..].to_vec();
 
                 let message = CompressedMapMessage {
@@ -1494,7 +1485,7 @@ impl ServerMessage {
                     }
 
                     let name_end = name_end.unwrap() + 1;
-                    let name = std::str::from_utf8(&data[..name_end - 1])?;
+                    let name = CStr::from_bytes_until_nul(&data[..name_end - 1])?.to_str()?;
 
                     if data.len() < name_end + 2 {
                         return Err(anyhow!("invalid count in arena directory entry"));
@@ -1559,7 +1550,7 @@ impl ServerMessage {
                 )));
             }
             0x33 => {
-                let reason = std::str::from_utf8(&packet[1..])?;
+                let reason = CStr::from_bytes_until_nul(&packet[1..])?.to_str()?;
 
                 let message = CustomLoginFailureMessage {
                     reason: reason.to_owned(),

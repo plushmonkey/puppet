@@ -137,6 +137,8 @@ impl PacketSequencer {
         let data = &chunk.data.data[..chunk.data.size];
         self.chunk_data.extend(data.iter());
 
+        println!("Downloading {}/{}", self.chunk_data.len(), chunk.total_size);
+
         if self.chunk_data.len() >= chunk.total_size as usize {
             self.process_queue.push(self.chunk_data.clone());
             self.chunk_data.clear();

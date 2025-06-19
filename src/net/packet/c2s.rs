@@ -280,6 +280,25 @@ impl Serialize for PasswordMessage {
     }
 }
 
+// 0x0C
+pub struct MapRequestMessage {}
+
+impl Serialize for MapRequestMessage {
+    fn serialize(&self) -> Packet {
+        Packet::empty().concat_u8(0x0C)
+    }
+}
+
+// 0x0D
+pub struct NewsRequestMessage {}
+
+impl Serialize for NewsRequestMessage {
+    fn serialize(&self) -> Packet {
+        Packet::empty().concat_u8(0x0D)
+    }
+}
+
+// 0x1A
 pub struct SecurityMessage {
     pub weapon_count: u32,
     pub settings_checksum: u32,
