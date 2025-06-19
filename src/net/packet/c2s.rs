@@ -1,4 +1,5 @@
 use crate::clock::ServerTick;
+use crate::net::packet::s2c::ChatKind;
 use crate::net::packet::{Packet, Serialize};
 use crate::ship::Ship;
 
@@ -142,6 +143,84 @@ impl Serialize for PositionMessage {
         packet.data[10] = checksum;
 
         packet
+    }
+}
+
+// 0x06
+pub struct SendChatMessage<'a> {
+    pub kind: ChatKind,
+    pub sound: u8,
+    pub target_id: u16,
+    pub text: &'a str,
+}
+
+impl<'a> SendChatMessage<'a> {
+    pub fn public(text: &'a str) -> SendChatMessage<'a> {
+        SendChatMessage {
+            kind: ChatKind::Public,
+            sound: 0,
+            target_id: 0,
+            text,
+        }
+    }
+
+    // target must be in the same arena
+    pub fn private(target_id: u16, text: &'a str) -> SendChatMessage<'a> {
+        SendChatMessage {
+            kind: ChatKind::Private,
+            sound: 0,
+            target_id,
+            text,
+        }
+    }
+
+    // text must be formatted as :target:message
+    pub fn remote_private(text: &'a str) -> SendChatMessage<'a> {
+        SendChatMessage {
+            kind: ChatKind::RemotePrivate,
+            sound: 0,
+            target_id: 0,
+            text,
+        }
+    }
+
+    pub fn team(text: &'a str) -> SendChatMessage<'a> {
+        SendChatMessage {
+            kind: ChatKind::Team,
+            sound: 0,
+            target_id: 0,
+            text,
+        }
+    }
+
+    pub fn frequency(frequency: u16, text: &'a str) -> SendChatMessage<'a> {
+        SendChatMessage {
+            kind: ChatKind::Team,
+            sound: 0,
+            target_id: frequency,
+            text,
+        }
+    }
+
+    // text must be formatted as 1;message
+    pub fn channel(text: &'a str) -> SendChatMessage<'a> {
+        SendChatMessage {
+            kind: ChatKind::Channel,
+            sound: 0,
+            target_id: 0,
+            text,
+        }
+    }
+}
+
+impl<'a> Serialize for SendChatMessage<'a> {
+    fn serialize(&self) -> Packet {
+        Packet::empty()
+            .concat_u8(0x06)
+            .concat_u8(self.kind as u8)
+            .concat_u8(self.sound)
+            .concat_u16(self.target_id)
+            .concat_str(self.text)
     }
 }
 
