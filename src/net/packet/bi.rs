@@ -65,6 +65,14 @@ pub struct SyncResponseMessage {
     pub server_timestamp: ServerTick,
 }
 
+pub struct DisconnectMessage {}
+
+impl Serialize for DisconnectMessage {
+    fn serialize(&self) -> Packet {
+        Packet::empty().concat_u8(0x00).concat_u8(0x07)
+    }
+}
+
 // 0x08
 pub struct SmallChunkBodyMessage {
     pub data: Packet,

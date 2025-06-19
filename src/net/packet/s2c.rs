@@ -59,6 +59,7 @@ pub enum GameServerMessage {
     PlayerBannerChanged(PlayerBannerChangedMessage),         // 0x1F
     CollectedPrize(CollectedPrizeMessage),                   // 0x20
     BrickDrop(BrickDropMessage),                             // 0x21
+    BrickClear,                                              // 0x21 - Empty packet. asss sends this
     TurfFlagUpdate(TurfFlagUpdateMessage),                   // 0x22
     FlagReward(FlagRewardMessage),                           // 0x23
     SpeedGameOver(SpeedGameOverMessage),                     // 0x24
@@ -816,11 +817,18 @@ impl ServerMessage {
                     return Err(anyhow!(e));
                 }
 
+                let mut message = message.unwrap();
+
+                // Special case empty messages because asss sends an empty message if the enter message is empty.
+                if !message.is_empty() && message.as_bytes()[0] == 0 {
+                    message = "";
+                }
+
                 let chat = ChatMessage {
                     kind,
                     sound,
                     sender,
-                    message: message.unwrap().to_owned(),
+                    message: message.to_owned(),
                 };
 
                 return Ok(Some(ServerMessage::Game(GameServerMessage::Chat(chat))));
@@ -1203,6 +1211,9 @@ impl ServerMessage {
                 )));
             }
             0x21 => {
+                if packet.len() == 1 {
+                    return Ok(Some(ServerMessage::Game(GameServerMessage::BrickClear)));
+                }
                 if packet.len() < 17 {
                     return Err(anyhow!("brick drop message was too small"));
                 }

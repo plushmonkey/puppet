@@ -4,6 +4,8 @@ use crate::net::packet::bi::*;
 use crate::net::packet::c2s::*;
 use crate::net::packet::s2c::*;
 use crate::ship::Ship;
+use ctrlc;
+use std::sync::mpsc::channel;
 
 pub mod arena_settings;
 pub mod clock;
@@ -12,6 +14,12 @@ pub mod player;
 pub mod ship;
 
 fn main() -> anyhow::Result<()> {
+    let (tx, rx) = channel();
+
+    let _ = ctrlc::set_handler(move || {
+        let _ = tx.send(());
+    });
+
     let username = "test";
     let password = "none";
     let remote_ip = "127.0.0.1";
@@ -27,6 +35,11 @@ fn main() -> anyhow::Result<()> {
     connection.send(&encrypt_request)?;
 
     loop {
+        // Exit loop if we receive a control-c signal.
+        if let Ok(_) = rx.try_recv() {
+            break;
+        }
+
         let now = LocalTick::now();
 
         let message = connection.tick();
@@ -59,7 +72,9 @@ fn main() -> anyhow::Result<()> {
                 },
                 ServerMessage::Game(kind) => match kind {
                     GameServerMessage::Chat(chat) => {
-                        println!("{}", chat.message);
+                        if !chat.message.is_empty() {
+                            println!("{}", chat.message);
+                        }
                     }
                     GameServerMessage::PasswordResponse(password_response) => {
                         println!("Got password response: {}", password_response.response);
@@ -74,12 +89,12 @@ fn main() -> anyhow::Result<()> {
                         connection.send(&arena_request)?;
                     }
                     GameServerMessage::ArenaSettings(_) => {
-                        println!("Received arena settings:");
+                        //println!("Received arena settings:");
                         // println!("{:?}", settings);
                     }
                     GameServerMessage::PlayerEntering(entering) => {
                         for entry in entering.players {
-                            println!("Player {} is entering the arena", entry.name);
+                            println!("{} entered arena", entry.name);
                         }
                     }
                     GameServerMessage::MapInformation(info) => {
@@ -128,6 +143,10 @@ fn main() -> anyhow::Result<()> {
 
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
+
+    // Always send disconnect when we are exiting so we don't linger on the server.
+    let disconnect = DisconnectMessage {};
+    connection.send(&disconnect)?;
 
     Ok(())
 }
