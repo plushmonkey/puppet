@@ -8,6 +8,7 @@ use ctrlc;
 use std::sync::mpsc::channel;
 
 pub mod arena_settings;
+pub mod checksum;
 pub mod clock;
 pub mod net;
 pub mod player;

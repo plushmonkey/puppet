@@ -1,3 +1,4 @@
+use crate::checksum::weapon_checksum;
 use crate::clock::ServerTick;
 use crate::net::packet::s2c::ChatKind;
 use crate::net::packet::{Packet, Serialize};
@@ -134,13 +135,7 @@ impl Serialize for PositionMessage {
             .concat_u16(self.energy)
             .concat_u16(self.weapon_info);
 
-        let mut checksum: u8 = 0;
-
-        for v in &packet.data[..packet.size] {
-            checksum ^= v;
-        }
-
-        packet.data[10] = checksum;
+        packet.data[10] = weapon_checksum(&packet.data[..packet.size]);
 
         packet
     }
@@ -282,5 +277,71 @@ impl Serialize for PasswordMessage {
             .concat_u32(0x00)
             .concat_u32(0x00)
             .concat_u32(0x00)
+    }
+}
+
+pub struct SecurityMessage {
+    pub weapon_count: u32,
+    pub settings_checksum: u32,
+    pub exe_checksum: u32,
+    pub level_checksum: u32,
+    pub s2c_slow_total: u32,
+    pub s2c_fast_total: u32,
+    pub s2c_slow_current: u16,
+    pub s2c_fast_current: u16,
+    pub s2c_reliable_out: u16,
+    pub ping: u16,
+    pub ping_average: u16,
+    pub ping_low: u16,
+    pub ping_high: u16,
+    pub slow_frame: bool,
+}
+
+impl SecurityMessage {
+    pub fn new(
+        weapon_count: u32,
+        settings_checksum: u32,
+        exe_checksum: u32,
+        level_checksum: u32,
+    ) -> SecurityMessage {
+        SecurityMessage {
+            weapon_count,
+            settings_checksum,
+            exe_checksum,
+            level_checksum,
+            s2c_slow_total: 0,
+            s2c_fast_total: 0,
+            s2c_slow_current: 0,
+            s2c_fast_current: 0,
+            s2c_reliable_out: 0,
+            ping: 0,
+            ping_average: 0,
+            ping_low: 0,
+            ping_high: 0,
+            slow_frame: false,
+        }
+    }
+}
+
+impl Serialize for SecurityMessage {
+    fn serialize(&self) -> Packet {
+        let slow_frame = if self.slow_frame { 1 } else { 0 };
+
+        Packet::empty()
+            .concat_u8(0x1A)
+            .concat_u32(self.weapon_count)
+            .concat_u32(self.settings_checksum)
+            .concat_u32(self.exe_checksum)
+            .concat_u32(self.level_checksum)
+            .concat_u32(self.s2c_slow_total)
+            .concat_u32(self.s2c_fast_total)
+            .concat_u16(self.s2c_slow_current)
+            .concat_u16(self.s2c_fast_current)
+            .concat_u16(self.s2c_reliable_out)
+            .concat_u16(self.ping)
+            .concat_u16(self.ping_average)
+            .concat_u16(self.ping_low)
+            .concat_u16(self.ping_high)
+            .concat_u8(slow_frame)
     }
 }
