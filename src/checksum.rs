@@ -1,3 +1,5 @@
+use crate::map::*;
+
 pub fn weapon_checksum(data: &[u8]) -> u8 {
     let mut checksum: u8 = 0;
 
@@ -8,122 +10,122 @@ pub fn weapon_checksum(data: &[u8]) -> u8 {
     checksum
 }
 
-pub fn settings_checksum(key: u32, data: &[u8]) -> Option<u32> {
+pub fn settings_checksum(key: u32, data: &[u8]) -> anyhow::Result<u32> {
     if data.len() % 4 != 0 {
-        return None;
+        return Err(anyhow::anyhow!("settings data must be multiple of 4"));
     }
 
     let mut sum: u32 = 0;
 
     for i in (0..data.len()).step_by(4) {
         let current = u32::from_le_bytes(data[i..i + 4].try_into().unwrap());
-        sum += current ^ key;
+        sum = sum.wrapping_add(current ^ key);
     }
 
-    Some(sum)
+    Ok(sum)
 }
 
 pub fn vie_checksum(key: u32) -> u32 {
     let mut csum: u32 = 0;
     let mut part: u32 = 0xc98ed41f;
 
-    part += 0x3e1bc | key;
+    part = part.wrapping_add(0x3e1bc | key);
     part ^= 0x42435942 ^ key;
-    part += 0x1d895300 | key;
+    part = part.wrapping_add(0x1d895300 | key);
     part ^= 0x6b5c4032 ^ key;
-    part += 0x467e44 | key;
+    part = part.wrapping_add(0x467e44 | key);
     part ^= 0x516c7eda ^ key;
-    part += 0x8b0c708b | key;
+    part = part.wrapping_add(0x8b0c708b | key);
     part ^= 0x6b3e3429 ^ key;
-    part += 0x560674c9 | key;
+    part = part.wrapping_add(0x560674c9 | key);
     part ^= 0xf4e6b721 ^ key;
-    part += 0xe90cc483 | key;
+    part = part.wrapping_add(0xe90cc483 | key);
     part ^= 0x80ece15a ^ key;
-    part += 0x728bce33 | key;
+    part = part.wrapping_add(0x728bce33 | key);
     part ^= 0x1fc5d1e6 ^ key;
-    part += 0x8b0c518b | key;
+    part = part.wrapping_add(0x8b0c518b | key);
     part ^= 0x24f1a96e ^ key;
-    part += 0x30ae0c1 | key;
+    part = part.wrapping_add(0x30ae0c1 | key);
     part ^= 0x8858741b ^ key;
-    csum += part;
+    csum = csum.wrapping_add(part);
 
     part = 0x9c15857d;
-    part += 0x424448b | key;
+    part = part.wrapping_add(0x424448b | key);
     part ^= 0xcd0455ee ^ key;
-    part += 0x727 | key;
+    part = part.wrapping_add(0x727 | key);
     part ^= 0x8d7f29cd ^ key;
-    csum += part;
+    csum = csum.wrapping_add(part);
 
     part = 0x824b9278;
-    part += 0x6590 | key;
+    part = part.wrapping_add(0x6590 | key);
     part ^= 0x8e16169a ^ key;
-    part += 0x8b524914 | key;
+    part = part.wrapping_add(0x8b524914 | key);
     part ^= 0x82dce03a ^ key;
-    part += 0xfa83d733 | key;
+    part = part.wrapping_add(0xfa83d733 | key);
     part ^= 0xb0955349 ^ key;
-    part += 0xe8000003 | key;
+    part = part.wrapping_add(0xe8000003 | key);
     part ^= 0x7cfe3604 ^ key;
-    csum += part;
+    csum = csum.wrapping_add(part);
 
     part = 0xe3f8d2af;
-    part += 0x2de85024 | key;
+    part = part.wrapping_add(0x2de85024 | key);
     part ^= 0xbed0296b ^ key;
-    part += 0x587501f8 | key;
+    part = part.wrapping_add(0x587501f8 | key);
     part ^= 0xada70f65 ^ key;
-    csum += part;
+    csum = csum.wrapping_add(part);
 
     part = 0xcb54d8a0;
-    part += 0xf000001 | key;
+    part = part.wrapping_add(0xf000001 | key);
     part ^= 0x330f19ff ^ key;
-    part += 0x909090c3 | key;
+    part = part.wrapping_add(0x909090c3 | key);
     part ^= 0xd20f9f9f ^ key;
-    part += 0x53004add | key;
+    part = part.wrapping_add(0x53004add | key);
     part ^= 0x5d81256b ^ key;
-    part += 0x8b004b65 | key;
+    part = part.wrapping_add(0x8b004b65 | key);
     part ^= 0xa5312749 ^ key;
-    part += 0xb8004b67 | key;
+    part = part.wrapping_add(0xb8004b67 | key);
     part ^= 0x8adf8fb1 ^ key;
-    part += 0x8901e283 | key;
+    part = part.wrapping_add(0x8901e283 | key);
     part ^= 0x8ec94507 ^ key;
-    part += 0x89d23300 | key;
+    part = part.wrapping_add(0x89d23300 | key);
     part ^= 0x1ff8e1dc ^ key;
-    part += 0x108a004a | key;
+    part = part.wrapping_add(0x108a004a | key);
     part ^= 0xc73d6304 ^ key;
-    part += 0x43d2d3 | key;
+    part = part.wrapping_add(0x43d2d3 | key);
     part ^= 0x6f78e4ff ^ key;
-    csum += part;
+    csum = csum.wrapping_add(part);
 
     part = 0x45c23f9;
-    part += 0x47d86097 | key;
+    part = part.wrapping_add(0x47d86097 | key);
     part ^= 0x7cb588bd ^ key;
-    part += 0x9286 | key;
+    part = part.wrapping_add(0x9286 | key);
     part ^= 0x21d700f8 ^ key;
-    part += 0xdf8e0fd9 | key;
+    part = part.wrapping_add(0xdf8e0fd9 | key);
     part ^= 0x42796c9e ^ key;
-    part += 0x8b000003 | key;
+    part = part.wrapping_add(0x8b000003 | key);
     part ^= 0x3ad32a21 ^ key;
-    csum += part;
+    csum = csum.wrapping_add(part);
 
     part = 0xb229a3d0;
-    part += 0x47d708 | key;
+    part = part.wrapping_add(0x47d708 | key);
     part ^= 0x10b0a91 ^ key;
-    csum += part;
+    csum = csum.wrapping_add(part);
 
     part = 0x466e55a7;
-    part += 0xc7880d8b | key;
+    part = part.wrapping_add(0xc7880d8b | key);
     part ^= 0x44ce7067 ^ key;
-    part += 0xe4 | key;
+    part = part.wrapping_add(0xe4 | key);
     part ^= 0x923a6d44 ^ key;
-    part += 0x640047d6 | key;
+    part = part.wrapping_add(0x640047d6 | key);
     part ^= 0xa62d606c ^ key;
-    part += 0x2bd1f7ae | key;
+    part = part.wrapping_add(0x2bd1f7ae | key);
     part ^= 0x2f5621fb ^ key;
-    part += 0x8b0f74ff | key;
+    part = part.wrapping_add(0x8b0f74ff | key);
     part ^= 0x2928b332;
-    csum += part;
+    csum = csum.wrapping_add(part);
 
     part = 0x62cf369a;
-    csum += part;
+    csum = csum.wrapping_add(part);
 
     return csum;
 }
@@ -248,6 +250,7 @@ const CRC32_REFLECTED_TABLE: [u32; 256] = [
     0xb3667a2e, 0xc4614ab8, 0x5d681b02, 0x2a6f2b94, 0xb40bbe37, 0xc30c8ea1, 0x5a05df1b, 0x2d02ef8d,
 ];
 
+// This is used for optional crc included at the end of the security packet.
 pub fn crc32_map(data: &[u8]) -> u32 {
     let mut crc: u32 = 0xFFFFFFFF;
 
@@ -260,4 +263,31 @@ pub fn crc32_map(data: &[u8]) -> u32 {
     }
 
     crc
+}
+
+pub fn checksum_map(map: &Map, key: u32) -> u32 {
+    const TILE_START: u8 = 1;
+    const TILE_END: u8 = 160;
+
+    let mut key = key;
+    let basekey = key;
+
+    let y_start = (basekey % 32) as u16;
+    let x_start = (basekey % 31) as u16;
+
+    for y in (y_start..1024).step_by(32) {
+        for x in (x_start..1024).step_by(31) {
+            let mut tile = map.get_tile(x, y);
+
+            if tile == 250 {
+                tile = 0;
+            }
+
+            if (tile >= TILE_START && tile <= TILE_END) || tile == TILE_ID_SAFE {
+                key = key.wrapping_add(basekey ^ tile as u32);
+            }
+        }
+    }
+
+    key
 }

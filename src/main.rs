@@ -1,3 +1,4 @@
+use crate::arena_settings::ArenaSettings;
 use crate::clock::*;
 use crate::map::Map;
 use crate::net::connection::{Connection, ConnectionState};
@@ -29,6 +30,261 @@ fn get_zone_path(zone: &str, filename: &str) -> String {
     format!("zones/{}/{}", zone, filename)
 }
 
+struct Client {
+    connection: Connection,
+    map: Map,
+    settings: Option<Box<ArenaSettings>>,
+    last_position_tick: LocalTick,
+
+    username: String,
+    password: String,
+    zone: String,
+}
+
+impl Client {
+    fn new(
+        username: &str,
+        password: &str,
+        zone: &str,
+        remote_ip: &str,
+        remote_port: u16,
+    ) -> anyhow::Result<Client> {
+        let mut connection = Connection::new(remote_ip, remote_port)?;
+
+        let key = 0;
+        let encrypt_request = EncryptionRequestMessage::new(key);
+
+        connection.state = ConnectionState::EncryptionHandshake;
+        connection.send(&encrypt_request)?;
+
+        Ok(Client {
+            connection,
+            map: Map::empty(0, ""),
+            settings: None,
+            last_position_tick: LocalTick::now(),
+            username: username.to_owned(),
+            password: password.to_owned(),
+            zone: zone.to_owned(),
+        })
+    }
+
+    fn run(&mut self, rx: std::sync::mpsc::Receiver<()>) -> anyhow::Result<()> {
+        loop {
+            // Exit loop if we receive a control-c signal.
+            if let Ok(_) = rx.try_recv() {
+                break;
+            }
+
+            let now = LocalTick::now();
+
+            loop {
+                let message = self.connection.tick();
+                if let Err(e) = message {
+                    println!("Error: {}", e);
+                    if e.is::<std::io::Error>() {
+                        break;
+                    }
+                    continue;
+                }
+
+                let message = message.unwrap();
+
+                if let Some(message) = message {
+                    self.process_message(message)?;
+                } else {
+                    // We are done processing everything now.
+                    break;
+                }
+            }
+
+            match self.connection.state {
+                ConnectionState::Playing => {
+                    if now.diff(&self.last_position_tick) > 300 {
+                        let position = PositionMessage {
+                            direction: 0,
+                            timestamp: self.connection.get_server_tick(),
+                            x_position: 0,
+                            y_position: 0,
+                            x_velocity: 0,
+                            y_velocity: 0,
+                            togglables: 0,
+                            bounty: 0,
+                            energy: 0,
+                            weapon_info: 0,
+                        };
+
+                        self.connection.send(&position)?;
+
+                        self.last_position_tick = now;
+                    }
+                }
+                ConnectionState::Disconnected => {
+                    break;
+                }
+                _ => {}
+            }
+
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+
+        // Always send disconnect when we are exiting so we don't linger on the server.
+        let disconnect = DisconnectMessage {};
+        self.connection.send(&disconnect)?;
+
+        Ok(())
+    }
+
+    fn process_message(&mut self, message: ServerMessage) -> anyhow::Result<()> {
+        match message {
+            ServerMessage::Core(kind) => match kind {
+                CoreServerMessage::EncryptionResponse(encrypt_response) => {
+                    println!("Encryption response: {}", encrypt_response.key);
+
+                    let password = PasswordMessage::new(
+                        &self.username,
+                        &self.password,
+                        false,
+                        0x1231241,
+                        240,
+                        0x86,
+                        123412,
+                    );
+
+                    self.connection.send_reliable(&password)?;
+
+                    let sync_request = SyncRequestMessage::new(2, 2);
+                    self.connection.send(&sync_request)?;
+                }
+                _ => {}
+            },
+            ServerMessage::Game(kind) => match kind {
+                GameServerMessage::Chat(chat) => {
+                    if !chat.message.is_empty() {
+                        println!("{}", chat.message);
+                    }
+                }
+                GameServerMessage::PasswordResponse(password_response) => {
+                    println!("Got password response: {}", password_response.response);
+
+                    let arena_request =
+                        ArenaJoinMessage::new(Ship::Spectator, 1920, 1080, ArenaRequest::AnyPublic);
+
+                    self.connection.send(&arena_request)?;
+                }
+                GameServerMessage::ArenaSettings(settings_message) => {
+                    println!("Received arena settings");
+                    // println!("{:?}", settings);
+                    self.settings = Some(settings_message);
+                }
+                GameServerMessage::SynchronizationRequest(sync) => {
+                    if sync.checksum_key != 0 && self.map.checksum != 0 {
+                        // Send security packet
+                        println!("Sync requested");
+
+                        if let Some(settings) = &self.settings {
+                            let settings_checksum = checksum::settings_checksum(
+                                sync.checksum_key,
+                                &settings.raw_bytes,
+                            )?;
+                            let exe_checksum = checksum::vie_checksum(sync.checksum_key);
+                            let level_checksum =
+                                checksum::checksum_map(&self.map, sync.checksum_key);
+
+                            let response = SecurityMessage::new(
+                                0,
+                                settings_checksum,
+                                exe_checksum,
+                                level_checksum,
+                            );
+                            println!("Sending security packet");
+                            self.connection.send(&response)?;
+                        }
+                    }
+                }
+                GameServerMessage::PlayerEntering(entering) => {
+                    for entry in entering.players {
+                        println!("{} entered arena", entry.name);
+                    }
+                }
+                GameServerMessage::MapInformation(info) => {
+                    println!("Map name: {}", info.filename);
+
+                    self.connection.state = ConnectionState::MapDownload;
+
+                    let chat = SendChatMessage::public("?arena");
+                    self.connection.send(&chat)?;
+
+                    let map_path = get_zone_path(&self.zone, &info.filename);
+                    let map_data = fs::read(map_path);
+
+                    if let Ok(map_data) = map_data {
+                        let checksum = checksum::crc32(&map_data);
+
+                        if checksum == info.checksum {
+                            if let Some(new_map) =
+                                Map::new(info.checksum, &info.filename, &map_data)
+                            {
+                                self.map = new_map;
+                            } else {
+                                println!("Map read errorr: failed to load tiles");
+                            }
+                            self.connection.state = ConnectionState::Playing;
+                        }
+                    } else if let Err(e) = map_data {
+                        println!("Map read error: {}", e);
+                    }
+
+                    if matches!(self.connection.state, ConnectionState::MapDownload) {
+                        // Request
+                        let map_request = MapRequestMessage {};
+                        self.connection.send(&map_request)?;
+
+                        self.connection.state = ConnectionState::MapDownload;
+
+                        self.map = Map::empty(info.checksum, &info.filename);
+                    }
+                }
+                GameServerMessage::CompressedMap(compressed) => {
+                    if compressed.filename == self.map.filename {
+                        let inflated = decompress_to_vec_zlib(compressed.data.as_slice());
+
+                        match inflated {
+                            Ok(inflated) => {
+                                let map_path = get_zone_path(&self.zone, &compressed.filename);
+
+                                if let Err(e) = build_zone_directory(&self.zone) {
+                                    println!("Error creating zone directory: {}", e);
+                                }
+
+                                if let Err(e) = fs::write(map_path, inflated.as_slice()) {
+                                    println!("Error writing map: {}", e);
+                                }
+
+                                if let Some(new_map) =
+                                    Map::new(self.map.checksum, &self.map.filename, &inflated)
+                                {
+                                    self.map = new_map;
+                                } else {
+                                    println!("Map read error: failed to load tiles");
+                                }
+                            }
+                            Err(e) => {
+                                println!("Error: {}", e);
+                            }
+                        }
+                    }
+                }
+                GameServerMessage::ArenaDirectory(directory) => {
+                    println!("directory: {:?}", directory);
+                }
+                _ => {}
+            },
+        }
+
+        Ok(())
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     let (tx, rx) = channel();
 
@@ -36,184 +292,16 @@ fn main() -> anyhow::Result<()> {
         let _ = tx.send(());
     });
 
+    // TODO: Load these from config
     let username = "test";
     let password = "none";
     let zone = "local";
     let remote_ip = "127.0.0.1";
     let remote_port = 5000;
 
-    let mut connection = Connection::new(remote_ip, remote_port)?;
-    let mut last_position_tick = LocalTick::now();
+    let mut client = Client::new(username, password, zone, remote_ip, remote_port)?;
 
-    let key = 0;
-    let encrypt_request = EncryptionRequestMessage::new(key);
-
-    let mut map = Map::empty(0, "");
-
-    connection.state = ConnectionState::EncryptionHandshake;
-    connection.send(&encrypt_request)?;
-
-    loop {
-        // Exit loop if we receive a control-c signal.
-        if let Ok(_) = rx.try_recv() {
-            break;
-        }
-
-        let now = LocalTick::now();
-
-        let message = connection.tick();
-        if let Err(e) = message {
-            println!("Error: {}", e);
-            if e.is::<std::io::Error>() {
-                break;
-            }
-            continue;
-        }
-
-        let message = message.unwrap();
-
-        if let Some(message) = message {
-            match message {
-                ServerMessage::Core(kind) => match kind {
-                    CoreServerMessage::EncryptionResponse(encrypt_response) => {
-                        println!("Encryption response: {}", encrypt_response.key);
-
-                        let password = PasswordMessage::new(
-                            username, password, false, 0x1231241, 240, 0x86, 123412,
-                        );
-
-                        connection.send_reliable(&password)?;
-
-                        let sync_request = SyncRequestMessage::new(2, 2);
-                        connection.send(&sync_request)?;
-                    }
-                    _ => {}
-                },
-                ServerMessage::Game(kind) => match kind {
-                    GameServerMessage::Chat(chat) => {
-                        if !chat.message.is_empty() {
-                            println!("{}", chat.message);
-                        }
-                    }
-                    GameServerMessage::PasswordResponse(password_response) => {
-                        println!("Got password response: {}", password_response.response);
-
-                        let arena_request = ArenaJoinMessage::new(
-                            Ship::Spectator,
-                            1920,
-                            1080,
-                            ArenaRequest::AnyPublic,
-                        );
-
-                        connection.send(&arena_request)?;
-                    }
-                    GameServerMessage::ArenaSettings(_) => {
-                        //println!("Received arena settings:");
-                        // println!("{:?}", settings);
-                    }
-                    GameServerMessage::PlayerEntering(entering) => {
-                        for entry in entering.players {
-                            println!("{} entered arena", entry.name);
-                        }
-                    }
-                    GameServerMessage::MapInformation(info) => {
-                        println!("Map name: {}", info.filename);
-
-                        connection.state = ConnectionState::MapDownload;
-
-                        let chat = SendChatMessage::public("?arena");
-                        connection.send(&chat)?;
-
-                        let map_path = get_zone_path(zone, &info.filename);
-                        let map_data = fs::read(map_path);
-
-                        if let Ok(map_data) = map_data {
-                            let checksum = checksum::crc32(&map_data);
-
-                            if checksum == info.checksum {
-                                map = Map::new(info.checksum, &info.filename, &map_data);
-                                connection.state = ConnectionState::Playing;
-                            }
-                        } else if let Err(e) = map_data {
-                            println!("Map read error: {}", e);
-                        }
-
-                        if matches!(connection.state, ConnectionState::MapDownload) {
-                            // Request
-                            let map_request = MapRequestMessage {};
-                            connection.send(&map_request)?;
-
-                            connection.state = ConnectionState::MapDownload;
-
-                            map = Map::empty(info.checksum, &info.filename);
-                        }
-                    }
-                    GameServerMessage::CompressedMap(compressed) => {
-                        if compressed.filename == map.filename {
-                            let inflated = decompress_to_vec_zlib(compressed.data.as_slice());
-
-                            match inflated {
-                                Ok(inflated) => {
-                                    let map_path = get_zone_path(zone, &compressed.filename);
-
-                                    if let Err(e) = build_zone_directory(zone) {
-                                        println!("Error creating zone directory: {}", e);
-                                    }
-
-                                    if let Err(e) = fs::write(map_path, inflated.as_slice()) {
-                                        println!("Error writing map: {}", e);
-                                    }
-
-                                    map.data = inflated;
-                                }
-                                Err(e) => {
-                                    println!("Error: {}", e);
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    GameServerMessage::ArenaDirectory(directory) => {
-                        println!("directory: {:?}", directory);
-                    }
-                    _ => {}
-                },
-            }
-        }
-
-        match connection.state {
-            ConnectionState::Playing => {
-                if now.diff(&last_position_tick) > 300 {
-                    let position = PositionMessage {
-                        direction: 0,
-                        timestamp: connection.get_server_tick(),
-                        x_position: 0,
-                        y_position: 0,
-                        x_velocity: 0,
-                        y_velocity: 0,
-                        togglables: 0,
-                        bounty: 0,
-                        energy: 0,
-                        weapon_info: 0,
-                    };
-
-                    connection.send(&position)?;
-
-                    last_position_tick = now;
-                }
-            }
-            ConnectionState::Disconnected => {
-                break;
-            }
-            _ => {}
-        }
-
-        std::thread::sleep(std::time::Duration::from_millis(1));
-    }
-
-    // Always send disconnect when we are exiting so we don't linger on the server.
-    let disconnect = DisconnectMessage {};
-    connection.send(&disconnect)?;
+    client.run(rx)?;
 
     Ok(())
 }

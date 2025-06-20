@@ -223,6 +223,9 @@ pub struct PrizeWeightSettings {
 
 #[derive(Debug)]
 pub struct ArenaSettings {
+    // This is necessary for computing checksums.
+    pub raw_bytes: [u8; 1428],
+
     // Whether to use exact bullet damage
     pub exact_damage: bool,
     // Whether to show dropped flags to spectators
@@ -875,6 +878,7 @@ impl ArenaSettings {
         let prize_weights = PrizeWeightSettings::parse(&data[1400..1428]).unwrap();
 
         Some(ArenaSettings {
+            raw_bytes: data.try_into().unwrap(),
             exact_damage,
             no_spec_flags,
             no_spec_xradar,

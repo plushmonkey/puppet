@@ -3,6 +3,7 @@ use crate::net::packet::bi::{ClusterMessage, HugeChunkMessage};
 use crate::net::packet::s2c::ServerMessage;
 use crate::net::packet::{MAX_PACKET_SIZE, Packet};
 use anyhow::Result;
+use std::collections::VecDeque;
 
 pub struct ReliableMessage {
     pub id: u32,
@@ -33,7 +34,8 @@ pub struct PacketSequencer {
     pub reliable_sent: Vec<ReliableMessage>,
     pub reliable_queue: Vec<ReliableMessage>,
     // This queue stores clustered packets and coalesced packets such as small and huge chunks.
-    pub process_queue: Vec<Vec<u8>>,
+    // A deque is used to reduce the amount of work for processing the queue in order.
+    pub process_queue: VecDeque<Vec<u8>>,
     pub chunk_data: Vec<u8>,
 }
 
@@ -44,7 +46,7 @@ impl PacketSequencer {
             next_reliable_gen_id: 0,
             reliable_sent: Vec::new(),
             reliable_queue: Vec::new(),
-            process_queue: Vec::new(),
+            process_queue: VecDeque::new(),
             chunk_data: Vec::new(),
         }
     }
@@ -73,7 +75,12 @@ impl PacketSequencer {
     }
 
     pub fn pop_process_queue(&mut self) -> Result<Option<ServerMessage>> {
-        // First try to find the next reliable message to process.
+        // Fully process the queue before we process reliable messages.
+        // This ensures clustered and coalesced messages are processed in order.
+        if let Some(data) = self.process_queue.pop_front() {
+            return ServerMessage::parse(&data[..]);
+        }
+
         if let Some(index) = self
             .reliable_queue
             .iter()
@@ -83,11 +90,6 @@ impl PacketSequencer {
 
             let rel = self.reliable_queue.swap_remove(index);
             return ServerMessage::parse(&rel.message[..rel.size]);
-        }
-
-        // Process the queue if we have no reliable messages to process.
-        if let Some(data) = self.process_queue.pop() {
-            return ServerMessage::parse(&data[..]);
         }
 
         Ok(None)
@@ -115,7 +117,7 @@ impl PacketSequencer {
             let mut process_data = Vec::new();
             process_data.extend(current_data.iter());
 
-            self.process_queue.push(process_data);
+            self.process_queue.push_back(process_data);
 
             data = &data[size + 1..];
         }
@@ -129,7 +131,7 @@ impl PacketSequencer {
     pub fn handle_small_chunk_tail(&mut self, packet: &Packet) {
         let data = &packet.data[..packet.size];
         self.chunk_data.extend(data.iter());
-        self.process_queue.push(self.chunk_data.clone());
+        self.process_queue.push_back(self.chunk_data.clone());
         self.chunk_data.clear();
     }
 
@@ -140,7 +142,7 @@ impl PacketSequencer {
         println!("Downloading {}/{}", self.chunk_data.len(), chunk.total_size);
 
         if self.chunk_data.len() >= chunk.total_size as usize {
-            self.process_queue.push(self.chunk_data.clone());
+            self.process_queue.push_back(self.chunk_data.clone());
             self.chunk_data.clear();
         }
     }

@@ -1485,7 +1485,7 @@ impl ServerMessage {
                     }
 
                     let name_end = name_end.unwrap() + 1;
-                    let name = CStr::from_bytes_until_nul(&data[..name_end - 1])?.to_str()?;
+                    let name = CStr::from_bytes_until_nul(&data[..name_end])?.to_str()?;
 
                     if data.len() < name_end + 2 {
                         return Err(anyhow!("invalid count in arena directory entry"));
