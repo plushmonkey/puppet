@@ -1,4 +1,5 @@
-use crate::client::Client;
+use crate::net::packet::c2s::RegistrationSex;
+use crate::{client::Client, net::packet::c2s::RegistrationFormMessage};
 use ctrlc;
 use std::sync::mpsc::channel;
 
@@ -27,7 +28,23 @@ fn main() -> anyhow::Result<()> {
     let remote_ip = "127.0.0.1";
     let remote_port = 5000;
 
-    let mut client = Client::new(username, password, zone, remote_ip, remote_port)?;
+    let registration = RegistrationFormMessage::new(
+        "puppet",
+        "puppet@puppet.com",
+        "puppet city",
+        "puppet state",
+        RegistrationSex::Female,
+        20,
+    );
+
+    let mut client = Client::new(
+        username,
+        password,
+        zone,
+        remote_ip,
+        remote_port,
+        registration,
+    )?;
 
     client.run(rx)?;
 

@@ -203,6 +203,22 @@ impl Packet {
         self.size += val.len();
     }
 
+    pub fn write_fixed_str(&mut self, val: &str, size: usize) {
+        let write_bytes = if val.len() > size { size } else { val.len() };
+
+        self.data[self.size..self.size + write_bytes]
+            .copy_from_slice(&val.as_bytes()[..write_bytes]);
+        self.size += write_bytes;
+
+        let remaining = size - write_bytes;
+
+        for i in 0..remaining {
+            self.data[self.size + i] = 0;
+        }
+
+        self.size += remaining;
+    }
+
     pub fn remaining(&self) -> usize {
         MAX_PACKET_SIZE - self.size
     }

@@ -299,6 +299,75 @@ impl Serialize for NewsRequestMessage {
     }
 }
 
+pub enum RegistrationSex {
+    Male,
+    Female,
+}
+
+impl RegistrationSex {
+    pub fn value(&self) -> u8 {
+        match self {
+            RegistrationSex::Male => 'M' as u8,
+            RegistrationSex::Female => 'F' as u8,
+        }
+    }
+}
+
+// 0x17
+pub struct RegistrationFormMessage {
+    pub real_name: String,
+    pub email: String,
+    pub city: String,
+    pub state: String,
+    pub sex: RegistrationSex,
+    pub age: u8,
+    pub connecting_from_home: bool,
+    pub connecting_from_work: bool,
+    pub connecting_from_school: bool,
+}
+
+impl RegistrationFormMessage {
+    pub fn new(
+        real_name: &str,
+        email: &str,
+        city: &str,
+        state: &str,
+        sex: RegistrationSex,
+        age: u8,
+    ) -> Self {
+        Self {
+            real_name: real_name.to_owned(),
+            email: email.to_owned(),
+            city: city.to_owned(),
+            state: state.to_owned(),
+            sex,
+            age,
+            connecting_from_home: true,
+            connecting_from_work: false,
+            connecting_from_school: false,
+        }
+    }
+
+    pub fn serialize(&self, out: &mut [u8]) {
+        let mut packet = Packet::empty().concat_u8(0x17);
+
+        packet.write_fixed_str(&self.real_name, 32);
+        packet.write_fixed_str(&self.email, 64);
+        packet.write_fixed_str(&self.city, 32);
+        packet.write_fixed_str(&self.state, 24);
+
+        packet.write_u8(self.sex.value());
+        packet.write_u8(self.connecting_from_home as u8);
+        packet.write_u8(self.connecting_from_work as u8);
+        packet.write_u8(self.connecting_from_school as u8);
+
+        packet.write_u32(0); // Processor type
+        packet.write_u32(0);
+
+        out[..packet.size].copy_from_slice(&packet.data[..packet.size]);
+    }
+}
+
 // 0x1A
 pub struct SecurityMessage {
     pub weapon_count: u32,

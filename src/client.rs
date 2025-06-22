@@ -34,6 +34,8 @@ pub struct Client {
     pub username: String,
     pub password: String,
     pub zone: String,
+
+    pub registration: RegistrationFormMessage,
 }
 
 impl Client {
@@ -43,6 +45,7 @@ impl Client {
         zone: &str,
         remote_ip: &str,
         remote_port: u16,
+        registration: RegistrationFormMessage,
     ) -> anyhow::Result<Client> {
         let connection = Connection::new(remote_ip, remote_port)?;
 
@@ -55,6 +58,7 @@ impl Client {
             username: username.to_owned(),
             password: password.to_owned(),
             zone: zone.to_owned(),
+            registration,
         })
     }
 
@@ -199,6 +203,28 @@ impl Client {
                             ArenaRequest::AnyPublic,
                         );
                         self.connection.send(&arena_request)?;
+                    }
+                    LoginResponse::Unregistered => {
+                        if password_response.registration_request {
+                            let mut registration_packet = vec![0; 766].into_boxed_slice();
+
+                            println!("Sending registration");
+
+                            self.registration.serialize(&mut registration_packet);
+                            self.connection.send_reliable_data(&registration_packet)?;
+                        } else {
+                            let password = PasswordMessage::new(
+                                &self.username,
+                                &self.password,
+                                true,
+                                0x1231241,
+                                240,
+                                0x86,
+                                123412,
+                            );
+
+                            self.connection.send_reliable(&password)?;
+                        }
                     }
                     _ => {
                         println!("Failed to login: {:?}", password_response.response);

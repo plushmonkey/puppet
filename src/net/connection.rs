@@ -66,7 +66,7 @@ impl Connection {
         ServerTick::now(self.tick_diff)
     }
 
-    pub fn send<T>(&self, message: &T) -> Result<()>
+    pub fn send<T>(&mut self, message: &T) -> Result<()>
     where
         T: Serialize,
     {
@@ -80,9 +80,13 @@ impl Connection {
         self.send_reliable_packet(&message.serialize())
     }
 
-    pub fn send_packet(&self, packet: &Packet) -> Result<()> {
+    pub fn send_packet(&mut self, packet: &Packet) -> Result<()> {
         if packet.size == 0 {
             return Err(anyhow!("packet must not be empty"));
+        }
+
+        if packet.size > MAX_PACKET_SIZE {
+            return self.send_reliable_packet(packet);
         }
 
         let buf = packet.data();
@@ -90,8 +94,8 @@ impl Connection {
 
         self.crypt.encrypt(buf, &mut encrypted.data[..buf.len()]);
 
-        //println!("Sending {:02x?}", buf);
-        println!("Sending {:02x?}", &encrypted.data[..buf.len()]);
+        println!("Sending {:02x?}", buf);
+        //println!("Sending {:02x?}", &encrypted.data[..buf.len()]);
 
         self.socket
             .send_to(&encrypted.data[..buf.len()], &self.remote_addr)?;
@@ -99,11 +103,53 @@ impl Connection {
         Ok(())
     }
 
+    pub fn send_reliable_data(&mut self, data: &[u8]) -> Result<()> {
+        if data.len() == 0 {
+            return Err(anyhow!("reliable packet payload must not be empty"));
+        }
+
+        const RELIABLE_HEADER_SIZE: usize = 6;
+        if data.len() + RELIABLE_HEADER_SIZE > MAX_PACKET_SIZE {
+            const CHUNK_HEADER_SIZE: usize = 2;
+            let mut data = data;
+
+            // Break our packet up into subpackets that are sent reliably as chunked (0x08/0x09) data.
+            while !data.is_empty() {
+                let mut subpacket = Packet::empty();
+
+                subpacket.size = data.len() + CHUNK_HEADER_SIZE;
+                if subpacket.size > MAX_PACKET_SIZE - RELIABLE_HEADER_SIZE {
+                    subpacket.size = MAX_PACKET_SIZE - RELIABLE_HEADER_SIZE;
+                }
+
+                let payload_size = subpacket.size - CHUNK_HEADER_SIZE;
+
+                subpacket.data[CHUNK_HEADER_SIZE..subpacket.size]
+                    .copy_from_slice(&data[..payload_size]);
+
+                data = &data[payload_size..];
+
+                subpacket.data[0] = 0x00;
+                subpacket.data[1] = if data.is_empty() { 0x09 } else { 0x08 };
+
+                if let Err(e) = self.send_reliable_packet(&subpacket) {
+                    println!("Err: {}", e);
+                }
+            }
+
+            return Ok(());
+        }
+
+        self.send_reliable_packet(&Packet::new(data))
+    }
+
     pub fn send_reliable_packet(&mut self, packet: &Packet) -> Result<()> {
         if packet.size == 0 {
             return Err(anyhow!("reliable packet payload must not be empty"));
         }
-        if packet.size + 6 > MAX_PACKET_SIZE {
+
+        const RELIABLE_HEADER_SIZE: usize = 6;
+        if packet.size + RELIABLE_HEADER_SIZE > MAX_PACKET_SIZE {
             return Err(anyhow!("reliable packet payload too large"));
         }
 
@@ -246,9 +292,11 @@ impl Connection {
 
         packet.size = size;
 
-        println!("Recv: {:02x?}", &packet.data[..size]);
+        //println!("Recv: {:02x?}", &packet.data[..size]);
 
         self.crypt.decrypt(&mut packet.data[..packet.size]);
+
+        println!("Recv: {:02x?}", &packet.data[..size]);
 
         Ok(Some(packet))
     }
