@@ -1,6 +1,6 @@
 use std::mem::{self, MaybeUninit};
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct ShipSettings {
     // How long Super lasts on the ship (in ticks)
     pub super_time: u32,
@@ -177,7 +177,7 @@ pub struct ShipSettings {
 }
 
 // Structure to define the starting coordinates for teams 0-3
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct SpawnSettings {
     // X Coordinate for the center point where this team will start
     pub x: i16,
@@ -188,7 +188,7 @@ pub struct SpawnSettings {
 }
 
 // Likelihood of each prize appearing
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct PrizeWeightSettings {
     pub quick_charge: u8,
 
@@ -221,7 +221,7 @@ pub struct PrizeWeightSettings {
     pub portal: u8,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct ArenaSettings {
     // This is necessary for computing checksums.
     pub raw_bytes: [u8; 1428],
