@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use crate::math::{Position, Velocity};
+use crate::{
+    clock::ServerTick,
+    math::{Position, Velocity},
+};
 
 #[allow(nonstandard_style)]
 pub mod StatusFlags {
@@ -52,7 +55,7 @@ pub struct Player {
     pub attach_parent: PlayerId,
     pub flag_count: u16,
 
-    pub last_position_timestamp: u16,
+    pub last_position_timestamp: ServerTick,
 }
 
 impl Player {
@@ -73,7 +76,7 @@ impl Player {
             attach_parent: PlayerId::invalid(),
             flag_count: 0,
 
-            last_position_timestamp: 0,
+            last_position_timestamp: ServerTick::empty(),
         }
     }
 }

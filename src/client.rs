@@ -204,6 +204,7 @@ impl Client {
 
                     player.flag_count = entry.flag_count;
                     player.attach_parent = entry.attach_parent;
+                    player.last_position_timestamp = self.connection.get_server_tick();
 
                     // If there was someone already in this place, say that they left.
                     // This can happen when joining at the same exact time as other players.
@@ -221,7 +222,11 @@ impl Client {
             }
             GameServerMessage::SmallPosition(message) => {
                 if let Some(player) = self.player_manager.get_mut(&message.player_id) {
-                    if player.last_position_timestamp < message.timestamp {
+                    let message_timestamp =
+                        ServerTick::from_mini(self.connection.get_server_tick(), message.timestamp)
+                            - message.ping as i32;
+
+                    if player.last_position_timestamp < message_timestamp {
                         player.position = Position::new(message.x as u32, message.y as u32);
                         player.velocity =
                             Velocity::new(message.x_velocity as i32, message.y_velocity as i32);
@@ -229,7 +234,7 @@ impl Client {
                         player.bounty = message.bounty as u16;
                         player.status = message.status;
                         player.ping = message.ping;
-                        player.last_position_timestamp = message.timestamp;
+                        player.last_position_timestamp = message_timestamp;
 
                         println!("{} at {:?}", player.name, player.position);
                     }
@@ -237,7 +242,11 @@ impl Client {
             }
             GameServerMessage::LargePosition(message) => {
                 if let Some(player) = self.player_manager.get_mut(&message.player_id) {
-                    if player.last_position_timestamp < message.timestamp {
+                    let message_timestamp =
+                        ServerTick::from_mini(self.connection.get_server_tick(), message.timestamp)
+                            - message.ping as i32;
+
+                    if player.last_position_timestamp < message_timestamp {
                         player.position = Position::new(message.x as u32, message.y as u32);
                         player.velocity =
                             Velocity::new(message.x_velocity as i32, message.y_velocity as i32);
@@ -245,9 +254,12 @@ impl Client {
                         player.bounty = message.bounty;
                         player.status = message.status;
                         player.ping = message.ping;
-                        player.last_position_timestamp = message.timestamp;
+                        player.last_position_timestamp = message_timestamp;
 
-                        println!("{} at {:?}", player.name, player.position);
+                        println!(
+                            "{} at {:?} {}",
+                            player.name, player.position, message.weapon
+                        );
                     }
                 }
             }

@@ -4,6 +4,7 @@ use crate::net::packet::Packet;
 use crate::net::packet::bi::*;
 use crate::player::PlayerId;
 use crate::ship::Ship;
+use crate::weapon::WeaponData;
 use anyhow::{Result, anyhow};
 use std::ffi::CStr;
 use std::fmt::{self, Debug};
@@ -191,7 +192,7 @@ pub struct LargePositionMessage {
     pub status: u8,
     pub ping: u8,
     pub bounty: u16,
-    pub weapon: u16,
+    pub weapon: WeaponData,
     pub extra: Option<ExtraPositionData>,
 }
 
@@ -771,7 +772,7 @@ impl ServerMessage {
                     ping: packet[14],
                     y: u16::from_le_bytes(packet[15..17].try_into().unwrap()),
                     bounty: u16::from_le_bytes(packet[17..19].try_into().unwrap()),
-                    weapon: u16::from_le_bytes(packet[19..21].try_into().unwrap()),
+                    weapon: u16::from_le_bytes(packet[19..21].try_into().unwrap()).into(),
                     extra,
                 };
                 return Ok(Some(ServerMessage::Game(GameServerMessage::LargePosition(

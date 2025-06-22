@@ -33,7 +33,7 @@ impl LocalTick {
         let a_value = (self.value << 1) as i32;
         let b_value = (other.value << 1) as i32;
 
-        (a_value - b_value) >> 1
+        (a_value.wrapping_sub(b_value)) >> 1
     }
 }
 
@@ -43,6 +43,7 @@ impl Add<i32> for LocalTick {
     fn add(self, rhs: i32) -> Self::Output {
         let v = self.value() as i32;
         let new_v = v.wrapping_add(rhs) as u32;
+
         LocalTick::new(new_v)
     }
 }
@@ -53,6 +54,7 @@ impl Sub<i32> for LocalTick {
     fn sub(self, rhs: i32) -> Self::Output {
         let v = self.value() as i32;
         let new_v = v.wrapping_sub(rhs) as u32;
+
         LocalTick::new(new_v)
     }
 }
@@ -147,8 +149,23 @@ impl ServerTick {
     pub fn new(value: u32, offset: i32) -> Self {
         let v = value as i32;
         let value = v.wrapping_add(offset) as u32;
+
         Self {
             value: value & 0x7FFFFFFF,
+        }
+    }
+
+    pub fn empty() -> Self {
+        Self { value: 0 }
+    }
+
+    pub fn from_mini(now: ServerTick, value: u16) -> Self {
+        let now_bottom = now.value() as i16;
+        let delta = now_bottom.wrapping_sub(value as i16) as i32;
+        let combined = (now.value() as i32).wrapping_add(delta);
+
+        Self {
+            value: combined as u32,
         }
     }
 
@@ -160,7 +177,7 @@ impl ServerTick {
         let a_value = (self.value << 1) as i32;
         let b_value = (other.value << 1) as i32;
 
-        (a_value - b_value) >> 1
+        (a_value.wrapping_sub(b_value)) >> 1
     }
 }
 
@@ -241,6 +258,7 @@ impl Add<i32> for ServerTick {
     fn add(self, rhs: i32) -> Self::Output {
         let v = self.value() as i32;
         let new_v = v.wrapping_add(rhs) as u32;
+
         ServerTick::new(new_v, 0)
     }
 }
@@ -251,6 +269,7 @@ impl Sub<i32> for ServerTick {
     fn sub(self, rhs: i32) -> Self::Output {
         let v = self.value() as i32;
         let new_v = v.wrapping_sub(rhs) as u32;
+
         ServerTick::new(new_v, 0)
     }
 }

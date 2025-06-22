@@ -11,6 +11,7 @@ pub mod math;
 pub mod net;
 pub mod player;
 pub mod ship;
+pub mod weapon;
 
 fn main() -> anyhow::Result<()> {
     let (tx, rx) = channel();
