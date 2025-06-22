@@ -160,7 +160,37 @@ impl Client {
         match message {
             GameServerMessage::Chat(chat) => {
                 if !chat.message.is_empty() {
-                    println!("{}", chat.message);
+                    match chat.kind {
+                        ChatKind::Public | ChatKind::PublicMacro => {
+                            if let Some(sender) = self.player_manager.get(&chat.sender) {
+                                println!("{}> {}", sender.name, chat.message);
+                            }
+                        }
+                        ChatKind::Team => {
+                            if let Some(sender) = self.player_manager.get(&chat.sender) {
+                                println!("T {}> {}", sender.name, chat.message);
+                            }
+                        }
+                        ChatKind::Frequency => {
+                            if let Some(sender) = self.player_manager.get(&chat.sender) {
+                                println!("F {}> {}", sender.name, chat.message);
+                            }
+                        }
+                        ChatKind::Arena | ChatKind::Error | ChatKind::Warning => {
+                            println!("A {}", chat.message);
+                        }
+                        ChatKind::Private => {
+                            if let Some(sender) = self.player_manager.get(&chat.sender) {
+                                println!("P {}> {}", sender.name, chat.message);
+                            }
+                        }
+                        ChatKind::RemotePrivate => {
+                            println!("RP {}", chat.message);
+                        }
+                        ChatKind::Channel => {
+                            println!("C {}", chat.message);
+                        }
+                    }
                 }
             }
             GameServerMessage::PasswordResponse(password_response) => {
@@ -200,7 +230,13 @@ impl Client {
             }
             GameServerMessage::PlayerEntering(entering) => {
                 for entry in &entering.players {
-                    let mut player = Player::new(entry.player_id, &entry.name, &entry.squad);
+                    let mut player = Player::new(
+                        entry.player_id,
+                        &entry.name,
+                        &entry.squad,
+                        entry.ship,
+                        entry.frequency,
+                    );
 
                     player.flag_count = entry.flag_count;
                     player.attach_parent = entry.attach_parent;

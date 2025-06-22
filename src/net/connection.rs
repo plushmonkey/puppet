@@ -4,6 +4,7 @@ use crate::net::packet::bi::ReliableDataMessage;
 use crate::net::packet::s2c::*;
 use crate::net::packet::sequencer::*;
 use crate::net::packet::{MAX_PACKET_SIZE, Packet, Serialize};
+use crate::player::PlayerId;
 
 use anyhow::{Result, anyhow};
 use std::{
@@ -27,6 +28,7 @@ pub struct Connection {
     pub state: ConnectionState,
     sequencer: PacketSequencer,
     pub tick_diff: i32,
+    pub player_id: PlayerId,
 }
 
 impl Connection {
@@ -43,6 +45,7 @@ impl Connection {
             state: ConnectionState::Disconnected,
             sequencer: PacketSequencer::new(),
             tick_diff: 0,
+            player_id: PlayerId::invalid(),
         })
     }
 
@@ -192,7 +195,12 @@ impl Connection {
                     self.sequencer.handle_cluster(cluster);
                 }
             },
-            _ => {}
+            ServerMessage::Game(kind) => match kind {
+                GameServerMessage::PlayerId(message) => {
+                    self.player_id = message.id;
+                }
+                _ => {}
+            },
         }
     }
 

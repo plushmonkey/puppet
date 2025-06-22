@@ -1,3 +1,4 @@
+use crate::ship::Ship;
 use std::collections::HashMap;
 
 use crate::{
@@ -44,6 +45,9 @@ pub struct Player {
     pub name: String,
     pub squad: String,
 
+    pub ship: Ship,
+    pub frequency: u16,
+
     pub position: Position,
     pub velocity: Velocity,
     pub direction: u8,
@@ -59,7 +63,7 @@ pub struct Player {
 }
 
 impl Player {
-    pub fn new(id: PlayerId, name: &str, squad: &str) -> Self {
+    pub fn new(id: PlayerId, name: &str, squad: &str, ship: Ship, frequency: u16) -> Self {
         Self {
             id,
             name: name.to_owned(),
@@ -68,6 +72,8 @@ impl Player {
             position: Position::new(0, 0),
             velocity: Velocity::new(0, 0),
             direction: 0,
+            ship,
+            frequency,
 
             bounty: 0,
             status: 0,
