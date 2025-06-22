@@ -2,6 +2,7 @@ use crate::arena_settings::ArenaSettings;
 use crate::checksum;
 use crate::clock::*;
 use crate::map::Map;
+use crate::math::{Position, Velocity};
 use crate::net::connection::{Connection, ConnectionState};
 use crate::net::packet::bi::*;
 use crate::net::packet::c2s::*;
@@ -216,6 +217,38 @@ impl Client {
             GameServerMessage::PlayerLeaving(leaving) => {
                 if let Some(player) = self.player_manager.remove_player(&leaving.player_id) {
                     println!("{} left arena", player.name);
+                }
+            }
+            GameServerMessage::SmallPosition(message) => {
+                if let Some(player) = self.player_manager.get_mut(&message.player_id) {
+                    if player.last_position_timestamp < message.timestamp {
+                        player.position = Position::new(message.x as u32, message.y as u32);
+                        player.velocity =
+                            Velocity::new(message.x_velocity as i32, message.y_velocity as i32);
+                        player.direction = message.direction;
+                        player.bounty = message.bounty as u16;
+                        player.status = message.status;
+                        player.ping = message.ping;
+                        player.last_position_timestamp = message.timestamp;
+
+                        println!("{} at {:?}", player.name, player.position);
+                    }
+                }
+            }
+            GameServerMessage::LargePosition(message) => {
+                if let Some(player) = self.player_manager.get_mut(&message.player_id) {
+                    if player.last_position_timestamp < message.timestamp {
+                        player.position = Position::new(message.x as u32, message.y as u32);
+                        player.velocity =
+                            Velocity::new(message.x_velocity as i32, message.y_velocity as i32);
+                        player.direction = message.direction;
+                        player.bounty = message.bounty;
+                        player.status = message.status;
+                        player.ping = message.ping;
+                        player.last_position_timestamp = message.timestamp;
+
+                        println!("{} at {:?}", player.name, player.position);
+                    }
                 }
             }
             GameServerMessage::MapInformation(info) => {

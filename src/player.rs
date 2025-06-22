@@ -37,12 +37,22 @@ impl From<u16> for PlayerId {
 
 pub struct Player {
     pub id: PlayerId,
+
     pub name: String,
     pub squad: String,
+
     pub position: Position,
     pub velocity: Velocity,
+    pub direction: u8,
+
+    pub bounty: u16,
+    pub status: u8,
+    pub ping: u8,
+
     pub attach_parent: PlayerId,
     pub flag_count: u16,
+
+    pub last_position_timestamp: u16,
 }
 
 impl Player {
@@ -51,10 +61,19 @@ impl Player {
             id,
             name: name.to_owned(),
             squad: squad.to_owned(),
+
             position: Position::new(0, 0),
             velocity: Velocity::new(0, 0),
+            direction: 0,
+
+            bounty: 0,
+            status: 0,
+            ping: 0,
+
             attach_parent: PlayerId::invalid(),
             flag_count: 0,
+
+            last_position_timestamp: 0,
         }
     }
 }
@@ -68,6 +87,14 @@ impl PlayerManager {
         Self {
             players: HashMap::new(),
         }
+    }
+
+    pub fn get(&self, id: &PlayerId) -> Option<&Player> {
+        self.players.get(id)
+    }
+
+    pub fn get_mut(&mut self, id: &PlayerId) -> Option<&mut Player> {
+        self.players.get_mut(&id)
     }
 
     pub fn add_player(&mut self, player: Player) -> Option<Player> {
