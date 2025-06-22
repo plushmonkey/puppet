@@ -140,10 +140,11 @@ impl Packet {
     pub fn concat_str(self, val: &str) -> Self {
         let mut result = Self {
             data: self.data,
-            size: self.size + val.len(),
+            size: self.size + val.len() + 1,
         };
 
         result.data[self.size..self.size + val.len()].copy_from_slice(val.as_bytes());
+        result.data[result.size] = 0;
         result
     }
 
@@ -193,7 +194,8 @@ impl Packet {
 
     pub fn write_str(&mut self, val: &str) {
         self.data[self.size..self.size + val.len()].copy_from_slice(val.as_bytes());
-        self.size += val.len();
+        self.size += val.len() + 1;
+        self.data[self.size] = 0;
     }
 
     pub fn write_bytes(&mut self, val: &[u8]) {
