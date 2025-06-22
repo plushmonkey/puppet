@@ -199,8 +199,8 @@ pub struct LargePositionMessage {
 // 0x06
 pub struct PlayerDeathMessage {
     pub prize_id: i8,
-    pub killer_id: u16,
-    pub killed_id: u16,
+    pub killer_id: PlayerId,
+    pub killed_id: PlayerId,
     pub bounty: u16,
     pub flag_transfer: u16,
 }
@@ -786,8 +786,8 @@ impl ServerMessage {
 
                 let player_death = PlayerDeathMessage {
                     prize_id: packet[1] as i8,
-                    killer_id: u16::from_le_bytes(packet[2..4].try_into().unwrap()),
-                    killed_id: u16::from_le_bytes(packet[4..6].try_into().unwrap()),
+                    killer_id: u16::from_le_bytes(packet[2..4].try_into().unwrap()).into(),
+                    killed_id: u16::from_le_bytes(packet[4..6].try_into().unwrap()).into(),
                     bounty: u16::from_le_bytes(packet[6..8].try_into().unwrap()),
                     flag_transfer: u16::from_le_bytes(packet[8..10].try_into().unwrap()),
                 };

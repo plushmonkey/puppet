@@ -299,6 +299,28 @@ impl Client {
                     }
                 }
             }
+            GameServerMessage::PlayerDeath(message) => {
+                if let Some(killer) = self.player_manager.get(&message.killer_id) {
+                    if let Some(killed) = self.player_manager.get(&message.killed_id) {
+                        println!("{} killed by {}", killed.name, killer.name);
+                    }
+                }
+
+                if let Some(killer) = self.player_manager.get_mut(&message.killer_id) {
+                    killer.flag_count += message.flag_transfer;
+                }
+            }
+            GameServerMessage::PlayerFrequencyChange(change) => {
+                if let Some(player) = self.player_manager.get_mut(&change.player_id) {
+                    player.frequency = change.frequency;
+                }
+            }
+            GameServerMessage::PlayerTeamAndShipChange(change) => {
+                if let Some(player) = self.player_manager.get_mut(&change.player_id) {
+                    player.ship = change.ship;
+                    player.frequency = change.frequency;
+                }
+            }
             GameServerMessage::MapInformation(info) => {
                 println!("Map name: {}", info.filename);
 
