@@ -2,6 +2,7 @@ use crate::arena_settings::ArenaSettings;
 use crate::clock::{LocalTick, ServerTick};
 use crate::net::packet::Packet;
 use crate::net::packet::bi::*;
+use crate::player::PlayerId;
 use crate::ship::Ship;
 use anyhow::{Result, anyhow};
 use std::ffi::CStr;
@@ -100,7 +101,7 @@ pub struct EncryptionResponseMessage {
 
 // 0x01
 pub struct PlayerIdMessage {
-    pub id: u16,
+    pub id: PlayerId,
 }
 
 pub struct PlayerEntering {
@@ -109,11 +110,11 @@ pub struct PlayerEntering {
     pub squad: String,
     pub kill_points: u32,
     pub flag_points: u32,
-    pub player_id: u16,
+    pub player_id: PlayerId,
     pub frequency: u16,
     pub kills: u16,
     pub deaths: u16,
-    pub attach_parent: u16,
+    pub attach_parent: PlayerId,
     pub flag_count: u16,
     pub has_koth: bool,
 }
@@ -125,7 +126,7 @@ pub struct PlayerEnteringMessage {
 
 // 0x04
 pub struct PlayerLeavingMessage {
-    pub player_id: u16,
+    pub player_id: PlayerId,
 }
 
 pub struct ItemSet {
@@ -185,7 +186,7 @@ pub struct LargePositionMessage {
     pub y: u16,
     pub x_velocity: i16,
     pub y_velocity: i16,
-    pub player_id: u16,
+    pub player_id: PlayerId,
     pub checksum: u8,
     pub status: u8,
     pub ping: u8,
@@ -221,7 +222,7 @@ pub enum ChatKind {
 pub struct ChatMessage {
     pub kind: ChatKind,
     pub sound: u8,
-    pub sender: u16,
+    pub sender: PlayerId,
     pub message: String,
 }
 
@@ -231,12 +232,12 @@ pub struct PrizePickupMessage {
     pub x: u16,
     pub y: u16,
     pub prize_id: i16,
-    pub player_id: u16,
+    pub player_id: PlayerId,
 }
 
 // 0x09
 pub struct ScoreUpdateMessage {
-    pub player_id: u16,
+    pub player_id: PlayerId,
     pub kill_points: u32,
     pub flag_points: u32,
     pub kills: u16,
@@ -288,20 +289,20 @@ pub struct PowerballGoalMessage {
 
 // 0x0C
 pub struct VoiceMessage {
-    pub player_id: u16,
+    pub player_id: PlayerId,
     pub wav_data: Vec<u8>,
 }
 
 // 0x0D
 pub struct PlayerFrequencyChangeMessage {
-    pub player_id: u16,
+    pub player_id: PlayerId,
     pub frequency: u16,
 }
 
 // 0x0E
 pub struct TurretLinkCreateMessage {
-    pub requester_id: u16,
-    pub destination_id: Option<u16>,
+    pub requester_id: PlayerId,
+    pub destination_id: Option<PlayerId>,
 }
 
 // 0x10
@@ -321,7 +322,7 @@ pub struct FlagPositionMessage {
 // 0x13
 pub struct FlagClaimMessage {
     pub flag_id: u16,
-    pub player_id: u16,
+    pub player_id: PlayerId,
 }
 
 // 0x14
@@ -332,12 +333,12 @@ pub struct FlagVictoryMessage {
 
 // 0x15
 pub struct TurretLinkDestroyMessage {
-    pub player_id: u16,
+    pub player_id: PlayerId,
 }
 
 // 0x16
 pub struct FlagDropMessage {
-    pub player_id: u16,
+    pub player_id: PlayerId,
 }
 
 // 0x18
@@ -356,19 +357,19 @@ pub struct RequestFileMessage {
 
 // 0x1A
 pub struct ResetScoreMessage {
-    pub player_id: u16,
+    pub player_id: PlayerId,
 }
 
 // 0x1C
 pub enum SpectateDataMessage {
-    Player(u16),
+    Player(PlayerId),
     ExtraPositionInfo(bool),
 }
 
 // 0x1D
 pub struct PlayerTeamAndShipChangeMessage {
     pub ship: Ship,
-    pub player_id: u16,
+    pub player_id: PlayerId,
     pub frequency: u16,
 }
 
@@ -379,7 +380,7 @@ pub struct SelfBannerChangedMessage {
 
 // 0x1F
 pub struct PlayerBannerChangedMessage {
-    pub player_id: u16,
+    pub player_id: PlayerId,
     pub banner_data: [u8; 96],
 }
 
@@ -425,11 +426,11 @@ pub struct SpeedGameOverMessage {
     pub player3_score: u32,
     pub player4_score: u32,
     pub player5_score: u32,
-    pub player1_id: u16,
-    pub player2_id: u16,
-    pub player3_id: u16,
-    pub player4_id: u16,
-    pub player5_id: u16,
+    pub player1_id: PlayerId,
+    pub player2_id: PlayerId,
+    pub player3_id: PlayerId,
+    pub player4_id: PlayerId,
+    pub player5_id: PlayerId,
 }
 
 // 0x25
@@ -447,7 +448,7 @@ pub struct SmallPositionMessage {
     pub y_velocity: i16,
     pub ping: u8,
     pub bounty: u8,
-    pub player_id: u8,
+    pub player_id: PlayerId,
     pub status: u8,
     pub extra: Option<ExtraPositionData>,
 }
@@ -474,7 +475,7 @@ pub struct KothSetTimerMessage {
 pub struct KothResetMessage {
     pub add_crown: bool,
     pub timer: u32,
-    pub player_id: u16,
+    pub player_id: PlayerId,
 }
 
 // 0x2D
@@ -489,7 +490,7 @@ pub struct PowerballPositionMessage {
     pub y: u16,
     pub x_velocity: i16,
     pub y_velocity: i16,
-    pub owner_id: u16,
+    pub owner_id: PlayerId,
     pub timestamp: ServerTick,
 }
 
@@ -672,7 +673,7 @@ impl ServerMessage {
                 let id = u16::from_le_bytes(packet[1..3].try_into().unwrap());
 
                 return Ok(Some(ServerMessage::Game(GameServerMessage::PlayerId(
-                    PlayerIdMessage { id },
+                    PlayerIdMessage { id: id.into() },
                 ))));
             }
             0x02 => {
@@ -694,11 +695,13 @@ impl ServerMessage {
                         squad: squad.to_owned(),
                         kill_points: u32::from_le_bytes(data[43..47].try_into().unwrap()),
                         flag_points: u32::from_le_bytes(data[47..51].try_into().unwrap()),
-                        player_id: u16::from_le_bytes(data[51..53].try_into().unwrap()),
+                        player_id: PlayerId::new(u16::from_le_bytes(
+                            data[51..53].try_into().unwrap(),
+                        )),
                         frequency: u16::from_le_bytes(data[53..55].try_into().unwrap()),
                         kills: u16::from_le_bytes(data[55..57].try_into().unwrap()),
                         deaths: u16::from_le_bytes(data[57..59].try_into().unwrap()),
-                        attach_parent: u16::from_le_bytes(data[59..61].try_into().unwrap()),
+                        attach_parent: u16::from_le_bytes(data[59..61].try_into().unwrap()).into(),
                         flag_count: u16::from_le_bytes(data[61..63].try_into().unwrap()),
                         has_koth: data[63] != 0,
                     };
@@ -717,7 +720,7 @@ impl ServerMessage {
                 }
 
                 let message = PlayerLeavingMessage {
-                    player_id: u16::from_le_bytes(packet[1..3].try_into().unwrap()),
+                    player_id: u16::from_le_bytes(packet[1..3].try_into().unwrap()).into(),
                 };
 
                 return Ok(Some(ServerMessage::Game(GameServerMessage::PlayerLeaving(
@@ -761,7 +764,7 @@ impl ServerMessage {
                     timestamp: u16::from_le_bytes(packet[2..4].try_into().unwrap()),
                     x: u16::from_le_bytes(packet[4..6].try_into().unwrap()),
                     y_velocity: i16::from_le_bytes(packet[6..8].try_into().unwrap()),
-                    player_id: u16::from_le_bytes(packet[8..10].try_into().unwrap()),
+                    player_id: u16::from_le_bytes(packet[8..10].try_into().unwrap()).into(),
                     x_velocity: i16::from_le_bytes(packet[10..12].try_into().unwrap()),
                     checksum: packet[12],
                     status: packet[13],
@@ -818,7 +821,7 @@ impl ServerMessage {
                 let chat = ChatMessage {
                     kind,
                     sound,
-                    sender,
+                    sender: sender.into(),
                     message: message.to_owned(),
                 };
 
@@ -837,7 +840,7 @@ impl ServerMessage {
                     x: u16::from_le_bytes(packet[5..7].try_into().unwrap()),
                     y: u16::from_le_bytes(packet[7..9].try_into().unwrap()),
                     prize_id: i16::from_le_bytes(packet[9..11].try_into().unwrap()),
-                    player_id: u16::from_le_bytes(packet[11..13].try_into().unwrap()),
+                    player_id: u16::from_le_bytes(packet[11..13].try_into().unwrap()).into(),
                 };
 
                 return Ok(Some(ServerMessage::Game(GameServerMessage::PrizePickup(
@@ -850,7 +853,7 @@ impl ServerMessage {
                 }
 
                 let message = ScoreUpdateMessage {
-                    player_id: u16::from_le_bytes(packet[1..3].try_into().unwrap()),
+                    player_id: u16::from_le_bytes(packet[1..3].try_into().unwrap()).into(),
                     kill_points: u32::from_le_bytes(packet[3..7].try_into().unwrap()),
                     flag_points: u32::from_le_bytes(packet[7..11].try_into().unwrap()),
                     kills: u16::from_le_bytes(packet[11..13].try_into().unwrap()),
@@ -933,7 +936,7 @@ impl ServerMessage {
                 let wav_data = packet[3..].to_vec();
 
                 let message = VoiceMessage {
-                    player_id: u16::from_le_bytes(packet[1..3].try_into().unwrap()),
+                    player_id: u16::from_le_bytes(packet[1..3].try_into().unwrap()).into(),
                     wav_data,
                 };
 
@@ -945,7 +948,7 @@ impl ServerMessage {
                 }
 
                 let message = PlayerFrequencyChangeMessage {
-                    player_id: u16::from_le_bytes(packet[1..3].try_into().unwrap()),
+                    player_id: u16::from_le_bytes(packet[1..3].try_into().unwrap()).into(),
                     frequency: u16::from_le_bytes(packet[3..5].try_into().unwrap()),
                 };
 
@@ -960,12 +963,13 @@ impl ServerMessage {
 
                 let mut destination_id = None;
                 if packet.len() >= 5 {
-                    destination_id = Some(u16::from_le_bytes(packet[3..5].try_into().unwrap()));
+                    destination_id =
+                        Some(u16::from_le_bytes(packet[3..5].try_into().unwrap()).into());
                 }
 
                 let message = TurretLinkCreateMessage {
-                    requester_id: u16::from_le_bytes(packet[1..3].try_into().unwrap()),
-                    destination_id,
+                    requester_id: u16::from_le_bytes(packet[1..3].try_into().unwrap()).into(),
+                    destination_id: destination_id.into(),
                 };
 
                 return Ok(Some(ServerMessage::Game(
@@ -1024,7 +1028,7 @@ impl ServerMessage {
 
                 let message = FlagClaimMessage {
                     flag_id: u16::from_le_bytes(packet[1..3].try_into().unwrap()),
-                    player_id: u16::from_le_bytes(packet[3..5].try_into().unwrap()),
+                    player_id: u16::from_le_bytes(packet[3..5].try_into().unwrap()).into(),
                 };
 
                 return Ok(Some(ServerMessage::Game(GameServerMessage::FlagClaim(
@@ -1051,7 +1055,7 @@ impl ServerMessage {
                 }
 
                 let message = TurretLinkDestroyMessage {
-                    player_id: u16::from_le_bytes(packet[1..3].try_into().unwrap()),
+                    player_id: u16::from_le_bytes(packet[1..3].try_into().unwrap()).into(),
                 };
 
                 return Ok(Some(ServerMessage::Game(
@@ -1064,7 +1068,7 @@ impl ServerMessage {
                 }
 
                 let message = FlagDropMessage {
-                    player_id: u16::from_le_bytes(packet[1..3].try_into().unwrap()),
+                    player_id: u16::from_le_bytes(packet[1..3].try_into().unwrap()).into(),
                 };
 
                 return Ok(Some(ServerMessage::Game(GameServerMessage::FlagDrop(
@@ -1116,7 +1120,7 @@ impl ServerMessage {
                 }
 
                 let message = ResetScoreMessage {
-                    player_id: u16::from_le_bytes(packet[1..3].try_into().unwrap()),
+                    player_id: u16::from_le_bytes(packet[1..3].try_into().unwrap()).into(),
                 };
 
                 return Ok(Some(ServerMessage::Game(GameServerMessage::ResetScore(
@@ -1138,9 +1142,9 @@ impl ServerMessage {
                     ))));
                 }
 
-                let message = SpectateDataMessage::Player(u16::from_le_bytes(
-                    packet[1..3].try_into().unwrap(),
-                ));
+                let player_id = PlayerId::new(u16::from_le_bytes(packet[1..3].try_into().unwrap()));
+
+                let message = SpectateDataMessage::Player(player_id);
 
                 return Ok(Some(ServerMessage::Game(GameServerMessage::SpectateData(
                     message,
@@ -1153,7 +1157,7 @@ impl ServerMessage {
 
                 let message = PlayerTeamAndShipChangeMessage {
                     ship: Ship::from_network_value(packet[1]),
-                    player_id: u16::from_le_bytes(packet[2..4].try_into().unwrap()),
+                    player_id: u16::from_le_bytes(packet[2..4].try_into().unwrap()).into(),
                     frequency: u16::from_le_bytes(packet[4..6].try_into().unwrap()),
                 };
                 return Ok(Some(ServerMessage::Game(
@@ -1179,7 +1183,7 @@ impl ServerMessage {
                 }
 
                 let message = PlayerBannerChangedMessage {
-                    player_id: u16::from_le_bytes(packet[1..3].try_into().unwrap()),
+                    player_id: u16::from_le_bytes(packet[1..3].try_into().unwrap()).into(),
                     banner_data: packet[3..99].try_into().unwrap(),
                 };
 
@@ -1285,11 +1289,11 @@ impl ServerMessage {
                     player3_score: u32::from_le_bytes(packet[16..20].try_into().unwrap()),
                     player4_score: u32::from_le_bytes(packet[20..24].try_into().unwrap()),
                     player5_score: u32::from_le_bytes(packet[24..28].try_into().unwrap()),
-                    player1_id: u16::from_le_bytes(packet[28..30].try_into().unwrap()),
-                    player2_id: u16::from_le_bytes(packet[30..32].try_into().unwrap()),
-                    player3_id: u16::from_le_bytes(packet[32..34].try_into().unwrap()),
-                    player4_id: u16::from_le_bytes(packet[34..36].try_into().unwrap()),
-                    player5_id: u16::from_le_bytes(packet[36..38].try_into().unwrap()),
+                    player1_id: u16::from_le_bytes(packet[28..30].try_into().unwrap()).into(),
+                    player2_id: u16::from_le_bytes(packet[30..32].try_into().unwrap()).into(),
+                    player3_id: u16::from_le_bytes(packet[32..34].try_into().unwrap()).into(),
+                    player4_id: u16::from_le_bytes(packet[34..36].try_into().unwrap()).into(),
+                    player5_id: u16::from_le_bytes(packet[36..38].try_into().unwrap()).into(),
                 };
 
                 return Ok(Some(ServerMessage::Game(GameServerMessage::SpeedGameOver(
@@ -1359,7 +1363,7 @@ impl ServerMessage {
                     x: u16::from_le_bytes(packet[4..6].try_into().unwrap()),
                     ping: packet[6],
                     bounty: packet[7],
-                    player_id: packet[8],
+                    player_id: PlayerId::new(packet[8] as u16),
                     status: packet[9],
                     y_velocity: i16::from_le_bytes(packet[10..12].try_into().unwrap()),
                     y: u16::from_le_bytes(packet[12..14].try_into().unwrap()),
@@ -1431,7 +1435,7 @@ impl ServerMessage {
                 let message = KothResetMessage {
                     add_crown: packet[1] != 0,
                     timer: u32::from_le_bytes(packet[2..6].try_into().unwrap()),
-                    player_id: u16::from_le_bytes(packet[6..8].try_into().unwrap()),
+                    player_id: u16::from_le_bytes(packet[6..8].try_into().unwrap()).into(),
                 };
 
                 return Ok(Some(ServerMessage::Game(GameServerMessage::KothReset(
@@ -1462,7 +1466,7 @@ impl ServerMessage {
                     y: u16::from_le_bytes(packet[4..6].try_into().unwrap()),
                     x_velocity: i16::from_le_bytes(packet[6..8].try_into().unwrap()),
                     y_velocity: i16::from_le_bytes(packet[8..10].try_into().unwrap()),
-                    owner_id: u16::from_le_bytes(packet[10..12].try_into().unwrap()),
+                    owner_id: u16::from_le_bytes(packet[10..12].try_into().unwrap()).into(),
                     timestamp: ServerTick::new(
                         u32::from_le_bytes(packet[12..16].try_into().unwrap()),
                         0,

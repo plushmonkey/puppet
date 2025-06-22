@@ -2,6 +2,7 @@ use crate::checksum::weapon_checksum;
 use crate::clock::ServerTick;
 use crate::net::packet::s2c::ChatKind;
 use crate::net::packet::{Packet, Serialize};
+use crate::player::PlayerId;
 use crate::ship::Ship;
 
 // Core packets
@@ -145,7 +146,7 @@ impl Serialize for PositionMessage {
 pub struct SendChatMessage<'a> {
     pub kind: ChatKind,
     pub sound: u8,
-    pub target_id: u16,
+    pub target_id: PlayerId,
     pub text: &'a str,
 }
 
@@ -154,13 +155,13 @@ impl<'a> SendChatMessage<'a> {
         SendChatMessage {
             kind: ChatKind::Public,
             sound: 0,
-            target_id: 0,
+            target_id: PlayerId::new(0),
             text,
         }
     }
 
     // target must be in the same arena
-    pub fn private(target_id: u16, text: &'a str) -> SendChatMessage<'a> {
+    pub fn private(target_id: PlayerId, text: &'a str) -> SendChatMessage<'a> {
         SendChatMessage {
             kind: ChatKind::Private,
             sound: 0,
@@ -174,7 +175,7 @@ impl<'a> SendChatMessage<'a> {
         SendChatMessage {
             kind: ChatKind::RemotePrivate,
             sound: 0,
-            target_id: 0,
+            target_id: PlayerId::new(0),
             text,
         }
     }
@@ -183,7 +184,7 @@ impl<'a> SendChatMessage<'a> {
         SendChatMessage {
             kind: ChatKind::Team,
             sound: 0,
-            target_id: 0,
+            target_id: PlayerId::new(0),
             text,
         }
     }
@@ -192,7 +193,7 @@ impl<'a> SendChatMessage<'a> {
         SendChatMessage {
             kind: ChatKind::Team,
             sound: 0,
-            target_id: frequency,
+            target_id: PlayerId::new(frequency),
             text,
         }
     }
@@ -202,7 +203,7 @@ impl<'a> SendChatMessage<'a> {
         SendChatMessage {
             kind: ChatKind::Channel,
             sound: 0,
-            target_id: 0,
+            target_id: PlayerId::new(0),
             text,
         }
     }
@@ -214,7 +215,7 @@ impl<'a> Serialize for SendChatMessage<'a> {
             .concat_u8(0x06)
             .concat_u8(self.kind as u8)
             .concat_u8(self.sound)
-            .concat_u16(self.target_id)
+            .concat_player_id(self.target_id)
             .concat_str(self.text)
     }
 }

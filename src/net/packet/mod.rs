@@ -1,4 +1,5 @@
 use crate::clock::{LocalTick, ServerTick};
+use crate::player::PlayerId;
 use std::fmt;
 
 pub mod bi;
@@ -93,6 +94,10 @@ impl Packet {
         result
     }
 
+    pub fn concat_player_id(self, val: PlayerId) -> Self {
+        self.concat_u16(val.value)
+    }
+
     pub fn concat_u32(self, val: u32) -> Self {
         let mut result = Self {
             data: self.data,
@@ -160,6 +165,10 @@ impl Packet {
     pub fn write_u16(&mut self, val: u16) {
         self.data[self.size..self.size + 2].copy_from_slice(&val.to_le_bytes());
         self.size += 2;
+    }
+
+    pub fn write_player_id(&mut self, val: PlayerId) {
+        self.write_u16(val.value)
     }
 
     pub fn write_u32(&mut self, val: u32) {

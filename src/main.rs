@@ -5,7 +5,9 @@ use crate::net::connection::{Connection, ConnectionState};
 use crate::net::packet::bi::*;
 use crate::net::packet::c2s::*;
 use crate::net::packet::s2c::*;
+use crate::player::*;
 use crate::ship::Ship;
+
 use ctrlc;
 use miniz_oxide::inflate::decompress_to_vec_zlib;
 use std::fs::{self, DirBuilder};
@@ -15,6 +17,7 @@ pub mod arena_settings;
 pub mod checksum;
 pub mod clock;
 pub mod map;
+pub mod math;
 pub mod net;
 pub mod player;
 pub mod ship;
@@ -35,6 +38,7 @@ struct Client {
     map: Map,
     settings: Option<Box<ArenaSettings>>,
     last_position_tick: LocalTick,
+    player_manager: PlayerManager,
 
     username: String,
     password: String,
@@ -62,6 +66,7 @@ impl Client {
             map: Map::empty(0, ""),
             settings: None,
             last_position_tick: LocalTick::now(),
+            player_manager: PlayerManager::new(),
             username: username.to_owned(),
             password: password.to_owned(),
             zone: zone.to_owned(),
@@ -203,7 +208,23 @@ impl Client {
                 }
                 GameServerMessage::PlayerEntering(entering) => {
                     for entry in entering.players {
+                        let mut player = Player::new(entry.player_id, &entry.name, &entry.squad);
+
+                        player.flag_count = entry.flag_count;
+                        player.attach_parent = entry.attach_parent;
+
+                        // If there was someone already in this place, say that they left.
+                        // This can happen when joining at the same exact time as other players.
+                        if let Some(old_player) = self.player_manager.add_player(player) {
+                            println!("{} left arena", old_player.name);
+                        }
+
                         println!("{} entered arena", entry.name);
+                    }
+                }
+                GameServerMessage::PlayerLeaving(leaving) => {
+                    if let Some(player) = self.player_manager.remove_player(&leaving.player_id) {
+                        println!("{} left arena", player.name);
                     }
                 }
                 GameServerMessage::MapInformation(info) => {
