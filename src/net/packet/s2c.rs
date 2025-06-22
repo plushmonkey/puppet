@@ -1,5 +1,5 @@
 use crate::arena_settings::ArenaSettings;
-use crate::clock::{LocalTick, ServerTick};
+use crate::clock::ServerTick;
 use crate::net::packet::Packet;
 use crate::net::packet::bi::*;
 use crate::player::PlayerId;
@@ -18,6 +18,7 @@ pub enum CoreServerMessage {
     EncryptionResponse(EncryptionResponseMessage),
     ReliableData(ReliableDataMessage),
     ReliableAck(ReliableAckMessage),
+    SyncRequest(SyncRequestMessage),
     SyncResponse(SyncResponseMessage),
     Disconnect,
     SmallChunkBody(SmallChunkBodyMessage),
@@ -594,20 +595,36 @@ impl ServerMessage {
                     ReliableAckMessage { id },
                 ))));
             }
+            0x05 => {
+                if packet.len() < 6 {
+                    return Err(anyhow!("sync request was too small"));
+                }
+
+                let tick_value = u32::from_le_bytes(packet[2..6].try_into().unwrap());
+                let packets_recv = 0;
+                let packets_sent = 0;
+
+                let message = SyncRequestMessage {
+                    local_tick: tick_value,
+                    packets_recv,
+                    packets_sent,
+                };
+                return Ok(Some(ServerMessage::Core(CoreServerMessage::SyncRequest(
+                    message,
+                ))));
+            }
             0x06 => {
                 if packet.len() < 10 {
                     return Err(anyhow!("sync response was too small"));
                 }
 
-                let request_timestamp =
-                    LocalTick::new(u32::from_le_bytes(packet[2..6].try_into().unwrap()));
-                let server_timestamp =
-                    ServerTick::new(u32::from_le_bytes(packet[6..10].try_into().unwrap()), 0);
+                let request_timestamp = u32::from_le_bytes(packet[2..6].try_into().unwrap());
+                let response_timestamp = u32::from_le_bytes(packet[6..10].try_into().unwrap());
 
                 return Ok(Some(ServerMessage::Core(CoreServerMessage::SyncResponse(
                     SyncResponseMessage {
                         request_timestamp,
-                        server_timestamp,
+                        response_timestamp,
                     },
                 ))));
             }

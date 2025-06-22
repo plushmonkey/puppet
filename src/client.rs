@@ -44,13 +44,7 @@ impl Client {
         remote_ip: &str,
         remote_port: u16,
     ) -> anyhow::Result<Client> {
-        let mut connection = Connection::new(remote_ip, remote_port)?;
-
-        let key = 0;
-        let encrypt_request = EncryptionRequestMessage::new(key);
-
-        connection.state = ConnectionState::EncryptionHandshake;
-        connection.send(&encrypt_request)?;
+        let connection = Connection::new(remote_ip, remote_port)?;
 
         Ok(Client {
             connection,
@@ -196,10 +190,21 @@ impl Client {
             GameServerMessage::PasswordResponse(password_response) => {
                 println!("Got password response: {}", password_response.response);
 
-                let arena_request =
-                    ArenaJoinMessage::new(Ship::Spectator, 1920, 1080, ArenaRequest::AnyPublic);
-
-                self.connection.send(&arena_request)?;
+                match &password_response.response {
+                    LoginResponse::Ok => {
+                        let arena_request = ArenaJoinMessage::new(
+                            Ship::Spectator,
+                            1920,
+                            1080,
+                            ArenaRequest::AnyPublic,
+                        );
+                        self.connection.send(&arena_request)?;
+                    }
+                    _ => {
+                        println!("Failed to login: {:?}", password_response.response);
+                        self.connection.state = ConnectionState::Disconnected;
+                    }
+                }
             }
             GameServerMessage::ArenaSettings(settings_message) => {
                 println!("Received arena settings");

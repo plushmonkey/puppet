@@ -1,6 +1,9 @@
 use crate::clock::*;
+use crate::net::crypt::VieEncrypt;
 use crate::net::packet::bi::HugeChunkCancelAckMessage;
 use crate::net::packet::bi::ReliableDataMessage;
+use crate::net::packet::bi::SyncResponseMessage;
+use crate::net::packet::c2s::EncryptionRequestMessage;
 use crate::net::packet::s2c::*;
 use crate::net::packet::sequencer::*;
 use crate::net::packet::{MAX_PACKET_SIZE, Packet, Serialize};
@@ -29,6 +32,7 @@ pub struct Connection {
     sequencer: PacketSequencer,
     pub tick_diff: i32,
     pub player_id: PlayerId,
+    pub crypt: VieEncrypt,
 }
 
 impl Connection {
@@ -39,14 +43,23 @@ impl Connection {
 
         socket.set_nonblocking(true)?;
 
-        Ok(Self {
+        let client_key = VieEncrypt::generate_key();
+
+        let mut result = Self {
             remote_addr,
             socket,
             state: ConnectionState::Disconnected,
             sequencer: PacketSequencer::new(),
             tick_diff: 0,
             player_id: PlayerId::invalid(),
-        })
+            crypt: VieEncrypt::new(client_key),
+        };
+
+        let encrypt_request = EncryptionRequestMessage::new(client_key);
+        result.state = ConnectionState::EncryptionHandshake;
+        result.send(&encrypt_request)?;
+
+        Ok(result)
     }
 
     pub fn get_server_tick(&self) -> ServerTick {
@@ -73,10 +86,15 @@ impl Connection {
         }
 
         let buf = packet.data();
+        let mut encrypted = Packet::empty();
 
-        println!("Sending {:02x?}", buf);
+        self.crypt.encrypt(buf, &mut encrypted.data[..buf.len()]);
 
-        self.socket.send_to(buf, &self.remote_addr)?;
+        //println!("Sending {:02x?}", buf);
+        println!("Sending {:02x?}", &encrypted.data[..buf.len()]);
+
+        self.socket
+            .send_to(&encrypted.data[..buf.len()], &self.remote_addr)?;
 
         Ok(())
     }
@@ -102,11 +120,7 @@ impl Connection {
 
         self.sequencer.push_reliable_sent(id, buf);
 
-        println!("Sending {:02x?}", buf);
-
-        self.socket.send_to(buf, &self.remote_addr)?;
-
-        Ok(())
+        self.send_packet(&packet)
     }
 
     pub fn tick(&mut self) -> Result<Option<ServerMessage>> {
@@ -140,8 +154,10 @@ impl Connection {
     fn process_packet(&mut self, message: &ServerMessage) {
         match message {
             ServerMessage::Core(kind) => match kind {
-                CoreServerMessage::EncryptionResponse(_) => {
-                    //
+                CoreServerMessage::EncryptionResponse(response) => {
+                    if !self.crypt.initialize(response.key) {
+                        println!("Failed to initialize vie encryption.");
+                    }
                 }
                 CoreServerMessage::ReliableAck(ack) => {
                     self.sequencer.handle_ack(ack.id);
@@ -158,10 +174,20 @@ impl Connection {
                         println!("Error: {}", e);
                     }
                 }
+                CoreServerMessage::SyncRequest(sync) => {
+                    let response = SyncResponseMessage {
+                        request_timestamp: sync.local_tick,
+                        response_timestamp: LocalTick::now().value(),
+                    };
+
+                    if let Err(e) = self.send(&response) {
+                        println!("Error: {}", e);
+                    }
+                }
                 CoreServerMessage::SyncResponse(sync) => {
-                    let server_timestamp = sync.server_timestamp.value() as i32;
+                    let server_timestamp = sync.response_timestamp as i32;
                     let current_timestamp = LocalTick::now().value() as i32;
-                    let rtt = current_timestamp - sync.request_timestamp.value() as i32;
+                    let rtt = current_timestamp - sync.request_timestamp as i32;
 
                     let current_time_diff = ((rtt * 3) / 5) + server_timestamp - current_timestamp;
 
@@ -221,6 +247,8 @@ impl Connection {
         packet.size = size;
 
         println!("Recv: {:02x?}", &packet.data[..size]);
+
+        self.crypt.decrypt(&mut packet.data[..packet.size]);
 
         Ok(Some(packet))
     }

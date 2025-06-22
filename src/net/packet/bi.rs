@@ -1,4 +1,4 @@
-use crate::clock::{LocalTick, ServerTick};
+use crate::clock::LocalTick;
 use crate::net::packet::{Packet, Serialize};
 
 // 0x03
@@ -33,7 +33,7 @@ impl Serialize for ReliableAckMessage {
 
 // 0x05
 pub struct SyncRequestMessage {
-    pub local_tick: LocalTick,
+    pub local_tick: u32,
     pub packets_sent: u32,
     pub packets_recv: u32,
 }
@@ -41,7 +41,7 @@ pub struct SyncRequestMessage {
 impl SyncRequestMessage {
     pub fn new(packets_sent: u32, packets_recv: u32) -> Self {
         Self {
-            local_tick: LocalTick::now(),
+            local_tick: LocalTick::now().value(),
             packets_sent,
             packets_recv,
         }
@@ -53,7 +53,7 @@ impl Serialize for SyncRequestMessage {
         Packet::empty()
             .concat_u8(0x00)
             .concat_u8(0x05)
-            .concat_u32(self.local_tick.value())
+            .concat_u32(self.local_tick)
             .concat_u32(self.packets_sent)
             .concat_u32(self.packets_recv)
     }
@@ -61,8 +61,18 @@ impl Serialize for SyncRequestMessage {
 
 // 0x06
 pub struct SyncResponseMessage {
-    pub request_timestamp: LocalTick,
-    pub server_timestamp: ServerTick,
+    pub request_timestamp: u32,
+    pub response_timestamp: u32,
+}
+
+impl Serialize for SyncResponseMessage {
+    fn serialize(&self) -> Packet {
+        Packet::empty()
+            .concat_u8(0x00)
+            .concat_u8(0x06)
+            .concat_u32(self.request_timestamp)
+            .concat_u32(self.response_timestamp)
+    }
 }
 
 pub struct DisconnectMessage {}
