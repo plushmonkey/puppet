@@ -169,6 +169,16 @@ impl ServerTick {
         }
     }
 
+    pub fn from_batched(now: ServerTick, value: u16) -> Self {
+        let now_bottom = (now.value() & 0x3FF) as i16;
+        let delta = now_bottom.wrapping_sub((value & 0x3FF) as i16) as i32;
+        let combined = (now.value() as i32).wrapping_add(delta);
+
+        Self {
+            value: combined as u32,
+        }
+    }
+
     pub fn value(&self) -> u32 {
         self.value
     }

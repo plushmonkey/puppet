@@ -9,6 +9,7 @@ use crate::net::packet::c2s::*;
 use crate::net::packet::s2c::*;
 use crate::player::*;
 use crate::ship::Ship;
+use crate::weapon::WeaponData;
 
 use miniz_oxide::inflate::decompress_to_vec_zlib;
 use std::fs::{self, DirBuilder};
@@ -104,7 +105,7 @@ impl Client {
                             togglables: 0,
                             bounty: 0,
                             energy: 0,
-                            weapon_info: 0,
+                            weapon_info: WeaponData::new(0),
                         };
 
                         self.connection.send(&position)?;
@@ -130,9 +131,7 @@ impl Client {
 
     fn process_core_message(&mut self, message: &CoreServerMessage) -> anyhow::Result<()> {
         match message {
-            CoreServerMessage::EncryptionResponse(encrypt_response) => {
-                println!("Encryption response: {}", encrypt_response.key);
-
+            CoreServerMessage::EncryptionResponse(_) => {
                 let password = PasswordMessage::new(
                     &self.username,
                     &self.password,
@@ -156,41 +155,39 @@ impl Client {
 
     fn process_game_message(&mut self, message: &GameServerMessage) -> anyhow::Result<()> {
         match message {
-            GameServerMessage::Chat(chat) => {
-                if !chat.message.is_empty() {
-                    match chat.kind {
-                        ChatKind::Public | ChatKind::PublicMacro => {
-                            if let Some(sender) = self.player_manager.get(&chat.sender) {
-                                println!("{}> {}", sender.name, chat.message);
-                            }
-                        }
-                        ChatKind::Team => {
-                            if let Some(sender) = self.player_manager.get(&chat.sender) {
-                                println!("T {}> {}", sender.name, chat.message);
-                            }
-                        }
-                        ChatKind::Frequency => {
-                            if let Some(sender) = self.player_manager.get(&chat.sender) {
-                                println!("F {}> {}", sender.name, chat.message);
-                            }
-                        }
-                        ChatKind::Arena | ChatKind::Error | ChatKind::Warning => {
-                            println!("A {}", chat.message);
-                        }
-                        ChatKind::Private => {
-                            if let Some(sender) = self.player_manager.get(&chat.sender) {
-                                println!("P {}> {}", sender.name, chat.message);
-                            }
-                        }
-                        ChatKind::RemotePrivate => {
-                            println!("RP {}", chat.message);
-                        }
-                        ChatKind::Channel => {
-                            println!("C {}", chat.message);
-                        }
+            GameServerMessage::Chat(chat) => match chat.kind {
+                ChatKind::Public | ChatKind::PublicMacro => {
+                    if let Some(sender) = self.player_manager.get(&chat.sender) {
+                        println!("{}> {}", sender.name, chat.message);
                     }
                 }
-            }
+                ChatKind::Team => {
+                    if let Some(sender) = self.player_manager.get(&chat.sender) {
+                        println!("T {}> {}", sender.name, chat.message);
+                    }
+                }
+                ChatKind::Frequency => {
+                    if let Some(sender) = self.player_manager.get(&chat.sender) {
+                        println!("F {}> {}", sender.name, chat.message);
+                    }
+                }
+                ChatKind::Arena | ChatKind::Error | ChatKind::Warning => {
+                    if !chat.message.is_empty() {
+                        println!("A {}", chat.message);
+                    }
+                }
+                ChatKind::Private => {
+                    if let Some(sender) = self.player_manager.get(&chat.sender) {
+                        println!("P {}> {}", sender.name, chat.message);
+                    }
+                }
+                ChatKind::RemotePrivate => {
+                    println!("RP {}", chat.message);
+                }
+                ChatKind::Channel => {
+                    println!("C {}", chat.message);
+                }
+            },
             GameServerMessage::PasswordResponse(password_response) => {
                 println!("Got password response: {}", password_response.response);
 
@@ -202,7 +199,7 @@ impl Client {
                             1080,
                             ArenaRequest::AnyPublic,
                         );
-                        self.connection.send(&arena_request)?;
+                        self.connection.send_reliable(&arena_request)?;
                     }
                     LoginResponse::Unregistered => {
                         if password_response.registration_request {
@@ -255,11 +252,14 @@ impl Client {
                             level_checksum,
                         );
                         println!("Sending security packet");
-                        self.connection.send(&response)?;
+                        self.connection.send_reliable(&response)?;
                     }
                 }
             }
             GameServerMessage::PlayerEntering(entering) => {
+                // TODO: Remove. Just here for testing so we get position packets from anywhere.
+                let mut sent_spectate_request = false;
+
                 for entry in &entering.players {
                     let mut player = Player::new(
                         entry.player_id,
@@ -279,7 +279,16 @@ impl Client {
                         println!("{} left arena", old_player.name);
                     }
 
-                    println!("{} entered arena", entry.name);
+                    println!("{} entered arena {:?}", entry.name, entry.ship);
+
+                    if !sent_spectate_request && entry.ship != Ship::Spectator {
+                        let spectate_request = SpectateMessage {
+                            player_id: entry.player_id,
+                        };
+
+                        self.connection.send_reliable(&spectate_request)?;
+                        sent_spectate_request = true;
+                    }
                 }
             }
             GameServerMessage::PlayerLeaving(leaving) => {
@@ -303,7 +312,10 @@ impl Client {
                         player.ping = message.ping;
                         player.last_position_timestamp = message_timestamp;
 
-                        println!("{} at {:?}", player.name, player.position);
+                        println!(
+                            "{} at {:?} {:?}",
+                            player.name, player.position, player.velocity
+                        );
                     }
                 }
             }
@@ -327,6 +339,55 @@ impl Client {
                             "{} at {:?} {}",
                             player.name, player.position, message.weapon
                         );
+                    }
+                }
+            }
+            GameServerMessage::BatchedSmallPosition(message) => {
+                for message in &message.positions {
+                    if let Some(player) = self.player_manager.get_mut(&message.player_id) {
+                        let message_timestamp = ServerTick::from_batched(
+                            self.connection.get_server_tick(),
+                            message.timestamp,
+                        );
+
+                        if player.last_position_timestamp < message_timestamp {
+                            player.position = Position::new(message.x as u32, message.y as u32);
+                            player.velocity =
+                                Velocity::new(message.x_velocity as i32, message.y_velocity as i32);
+                            player.direction = message.direction;
+                            player.last_position_timestamp = message_timestamp;
+
+                            println!(
+                                "{} at sbatched {:?} {:?}",
+                                player.name, player.position, player.velocity
+                            );
+                        }
+                    }
+                }
+            }
+            GameServerMessage::BatchedLargePosition(message) => {
+                for message in &message.positions {
+                    if let Some(player) = self.player_manager.get_mut(&message.player_id) {
+                        let message_timestamp = ServerTick::from_batched(
+                            self.connection.get_server_tick(),
+                            message.timestamp,
+                        );
+
+                        if player.last_position_timestamp < message_timestamp {
+                            player.position = Position::new(message.x as u32, message.y as u32);
+                            player.velocity =
+                                Velocity::new(message.x_velocity as i32, message.y_velocity as i32);
+                            player.direction = message.direction;
+                            player.last_position_timestamp = message_timestamp;
+                            if let Some(status) = message.status {
+                                player.status = status;
+                            }
+
+                            println!(
+                                "{} at lbatched {:?} {:?}",
+                                player.name, player.position, player.velocity
+                            );
+                        }
                     }
                 }
             }
@@ -358,7 +419,7 @@ impl Client {
                 self.connection.state = ConnectionState::MapDownload;
 
                 let chat = SendChatMessage::public("?arena");
-                self.connection.send(&chat)?;
+                self.connection.send_reliable(&chat)?;
 
                 let map_path = get_zone_path(&self.zone, &info.filename);
                 let map_data = fs::read(map_path);
@@ -381,7 +442,7 @@ impl Client {
                 if matches!(self.connection.state, ConnectionState::MapDownload) {
                     // Request
                     let map_request = MapRequestMessage {};
-                    self.connection.send(&map_request)?;
+                    self.connection.send_reliable(&map_request)?;
 
                     self.connection.state = ConnectionState::MapDownload;
 

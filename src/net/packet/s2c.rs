@@ -87,8 +87,8 @@ pub enum GameServerMessage {
     LvzModify,                                               // 0x36
     WatchDamageToggle,                                       // 0x37
     WatchDamage,                                             // 0x38
-    BatchedSmallPosition,                                    // 0x39
-    BatchedLargePosition,                                    // 0x3A
+    BatchedSmallPosition(BatchedPositionMessage),            // 0x39
+    BatchedLargePosition(BatchedPositionMessage),            // 0x3A
     Redirect,                                                // 0x3B
     SelectBox,                                               // 0x3C
 }
@@ -535,6 +535,22 @@ pub struct ContinuumVersionMessage {
     pub checksum: u32,
 }
 
+pub struct BatchedPosition {
+    pub player_id: PlayerId,
+    pub direction: u8,
+    pub timestamp: u16,
+    pub x: u16,
+    pub y: u16,
+    pub x_velocity: i16,
+    pub y_velocity: i16,
+    pub status: Option<u8>,
+}
+
+// 0x39, 0x3A
+pub struct BatchedPositionMessage {
+    pub positions: Vec<BatchedPosition>,
+}
+
 impl ServerMessage {
     pub fn parse(packet: &[u8]) -> Result<Option<ServerMessage>> {
         if packet.len() <= 0 {
@@ -708,7 +724,7 @@ impl ServerMessage {
                     let squad = CStr::from_bytes_until_nul(&data[23..43])?.to_str()?;
 
                     let current = PlayerEntering {
-                        ship: Ship::from_network_value(data[0]),
+                        ship: Ship::from_network_value(data[1]),
                         name: name.to_owned(),
                         squad: squad.to_owned(),
                         kill_points: u32::from_le_bytes(data[43..47].try_into().unwrap()),
@@ -1611,13 +1627,98 @@ impl ServerMessage {
                 return Ok(Some(ServerMessage::Game(GameServerMessage::WatchDamage)));
             }
             0x39 => {
+                if packet.len() < 11 {
+                    return Err(anyhow!("batched small position message was too small"));
+                }
+
+                let mut positions = Vec::new();
+
+                positions.reserve((packet.len() - 1) / 10);
+
+                let mut data = &packet[1..];
+                while data.len() >= 10 {
+                    let player_id = PlayerId::new(data[0] as u16);
+                    let packed1 = u16::from_le_bytes(data[1..3].try_into().unwrap());
+                    let packed2 = u32::from_le_bytes(data[3..7].try_into().unwrap());
+                    let packed3 = u16::from_le_bytes(data[7..9].try_into().unwrap());
+                    let packed4 = data[9] as u16;
+
+                    // Store x velocity in the high bits of u16 then shift it down as i16 for sign extension.
+                    let x_velocity =
+                        packed4 << 8 | ((packed3 >> 14) << 6) | (((packed2 >> 0x1C) as u16) << 2);
+                    let x_velocity = (x_velocity as i16) >> 2;
+
+                    // Shift up to clear the 2 bits of x_velocity and to sign extend back down for negative velocity.
+                    let y_velocity = ((packed3 << 2) as i16) >> 2;
+
+                    let batched_position = BatchedPosition {
+                        player_id,
+                        direction: (packed1 >> 10) as u8,
+                        timestamp: (packed1 & 0x3FF) as u16,
+                        x: (packed2 & 0x3FFF) as u16,
+                        y: ((packed2 >> 0x0E) & 0x3FFF) as u16,
+                        x_velocity,
+                        y_velocity,
+                        status: None,
+                    };
+
+                    positions.push(batched_position);
+
+                    data = &data[10..];
+                }
+
+                let message = BatchedPositionMessage { positions };
+
                 return Ok(Some(ServerMessage::Game(
-                    GameServerMessage::BatchedSmallPosition,
+                    GameServerMessage::BatchedSmallPosition(message),
                 )));
             }
             0x3A => {
+                if packet.len() < 12 {
+                    return Err(anyhow!("batched large position message was too small"));
+                }
+
+                let mut positions = Vec::new();
+
+                positions.reserve((packet.len() - 1) / 11);
+
+                let mut data = &packet[1..];
+                while data.len() >= 11 {
+                    let status_pid = u16::from_le_bytes(data[..2].try_into().unwrap());
+                    let player_id = PlayerId::new((status_pid & 0x3FF) as u16);
+                    let status = Some((status_pid >> 10) as u8);
+                    let packed1 = u16::from_le_bytes(data[2..4].try_into().unwrap());
+                    let packed2 = u32::from_le_bytes(data[4..8].try_into().unwrap());
+                    let packed3 = u16::from_le_bytes(data[8..10].try_into().unwrap());
+                    let packed4 = data[10] as u16;
+
+                    // Store x velocity in the high bits of u16 then shift it down as i16 for sign extension.
+                    let x_velocity =
+                        packed4 << 8 | ((packed3 >> 14) << 6) | (((packed2 >> 0x1C) as u16) << 2);
+                    let x_velocity = (x_velocity as i16) >> 2;
+
+                    // Shift up to clear the 2 bits of x_velocity and to sign extend back down for negative velocity.
+                    let y_velocity = ((packed3 << 2) as i16) >> 2;
+
+                    let batched_position = BatchedPosition {
+                        player_id,
+                        direction: (packed1 >> 10) as u8,
+                        timestamp: (packed1 & 0x3FF) as u16,
+                        x: (packed2 & 0x3FFF) as u16,
+                        y: ((packed2 >> 0x0E) & 0x3FFF) as u16,
+                        x_velocity,
+                        y_velocity,
+                        status,
+                    };
+
+                    positions.push(batched_position);
+
+                    data = &data[11..];
+                }
+
+                let message = BatchedPositionMessage { positions };
                 return Ok(Some(ServerMessage::Game(
-                    GameServerMessage::BatchedLargePosition,
+                    GameServerMessage::BatchedLargePosition(message),
                 )));
             }
             0x3B => {

@@ -94,7 +94,7 @@ impl Connection {
 
         self.crypt.encrypt(buf, &mut encrypted.data[..buf.len()]);
 
-        println!("Sending {:02x?}", buf);
+        //println!("Sending {:02x?}", buf);
         //println!("Sending {:02x?}", &encrypted.data[..buf.len()]);
 
         self.socket
@@ -201,6 +201,7 @@ impl Connection {
         match message {
             ServerMessage::Core(kind) => match kind {
                 CoreServerMessage::EncryptionResponse(response) => {
+                    println!("Initializing encryption with key {}", response.key);
                     if !self.crypt.initialize(response.key) {
                         println!("Failed to initialize vie encryption.");
                     }
@@ -292,11 +293,11 @@ impl Connection {
 
         packet.size = size;
 
-        //println!("Recv: {:02x?}", &packet.data[..size]);
+        //println!("RecvRaw: {:02x?}", &packet.data[..size]);
 
         self.crypt.decrypt(&mut packet.data[..packet.size]);
 
-        println!("Recv: {:02x?}", &packet.data[..size]);
+        //println!("Recv: {:02x?}", &packet.data[..size]);
 
         Ok(Some(packet))
     }

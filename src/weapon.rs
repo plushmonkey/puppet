@@ -31,7 +31,7 @@ impl Into<WeaponKind> for u16 {
 
 #[derive(Copy, Clone)]
 pub struct WeaponData {
-    value: u16,
+    pub value: u16,
 }
 
 impl WeaponData {

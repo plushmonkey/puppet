@@ -1,9 +1,12 @@
+use std::collections::HashMap;
+
 use crate::checksum::weapon_checksum;
 use crate::clock::ServerTick;
 use crate::net::packet::s2c::ChatKind;
 use crate::net::packet::{Packet, Serialize};
 use crate::player::PlayerId;
 use crate::ship::Ship;
+use crate::weapon::WeaponData;
 
 // Core packets
 
@@ -105,8 +108,16 @@ impl Serialize for ArenaJoinMessage {
     }
 }
 
+// 0x02
+pub struct LeaveArenaMessage {}
+
+impl Serialize for LeaveArenaMessage {
+    fn serialize(&self) -> Packet {
+        Packet::empty().concat_u8(0x02)
+    }
+}
+
 // 0x03
-// TODO: Turn these into real types
 pub struct PositionMessage {
     pub direction: u8,
     pub timestamp: ServerTick,
@@ -117,7 +128,7 @@ pub struct PositionMessage {
     pub togglables: u8,
     pub bounty: u16,
     pub energy: u16,
-    pub weapon_info: u16,
+    pub weapon_info: WeaponData,
 }
 
 impl Serialize for PositionMessage {
@@ -134,11 +145,26 @@ impl Serialize for PositionMessage {
             .concat_i16(self.y_velocity)
             .concat_u16(self.bounty)
             .concat_u16(self.energy)
-            .concat_u16(self.weapon_info);
+            .concat_u16(self.weapon_info.value);
 
         packet.data[10] = weapon_checksum(&packet.data[..packet.size]);
 
         packet
+    }
+}
+
+// 0x05
+pub struct DeathMessage {
+    pub killer_id: PlayerId,
+    pub bounty: u16,
+}
+
+impl Serialize for DeathMessage {
+    fn serialize(&self) -> Packet {
+        Packet::empty()
+            .concat_u8(0x05)
+            .concat_u16(self.killer_id.value)
+            .concat_u16(self.bounty)
     }
 }
 
@@ -220,6 +246,38 @@ impl<'a> Serialize for SendChatMessage<'a> {
     }
 }
 
+// 0x07
+pub struct TakePrizeMessage {
+    pub timestamp: ServerTick,
+    pub x: u16,
+    pub y: u16,
+    pub prize: i16,
+}
+
+impl Serialize for TakePrizeMessage {
+    fn serialize(&self) -> Packet {
+        Packet::empty()
+            .concat_u8(0x07)
+            .concat_u32(self.timestamp.value())
+            .concat_u16(self.x)
+            .concat_u16(self.y)
+            .concat_i16(self.prize)
+    }
+}
+
+// 0x08
+pub struct SpectateMessage {
+    pub player_id: PlayerId,
+}
+
+impl Serialize for SpectateMessage {
+    fn serialize(&self) -> Packet {
+        Packet::empty()
+            .concat_u8(0x08)
+            .concat_u16(self.player_id.value)
+    }
+}
+
 // 0x09
 pub struct PasswordMessage {
     pub new_user: bool,
@@ -229,6 +287,20 @@ pub struct PasswordMessage {
     pub timezone: u16,
     pub version: u16,
     pub permission_id: u32,
+}
+
+// Client features that extend beyond the VIE client so the server knows we support them.
+// Works with SubspaceServer.NET:
+// https://github.com/gigamon-dev/SubspaceServer/blob/master/src/Packets/Game/LoginPacket.cs
+#[allow(nonstandard_style)]
+pub mod ClientFeatures {
+    pub const WatchDamage: u16 = 1 << 0;
+    pub const BatchPositions: u16 = 1 << 1;
+    pub const WarpTo: u16 = 1 << 2;
+    pub const Lvz: u16 = 1 << 3;
+    pub const Redirect: u16 = 1 << 4;
+    pub const SelectBox: u16 = 1 << 5;
+    pub const Continuum: u16 = WatchDamage | BatchPositions | WarpTo | Lvz | Redirect | SelectBox;
 }
 
 impl PasswordMessage {
@@ -262,6 +334,13 @@ impl PasswordMessage {
 impl Serialize for PasswordMessage {
     fn serialize(&self) -> Packet {
         let new_user = if self.new_user { 1 } else { 0 };
+
+        let mut client_features: u16 = 0;
+
+        client_features |= ClientFeatures::BatchPositions;
+        client_features |= ClientFeatures::WarpTo;
+        client_features |= ClientFeatures::Lvz;
+
         Packet::empty()
             .concat_u8(0x09)
             .concat_u8(new_user)
@@ -272,12 +351,22 @@ impl Serialize for PasswordMessage {
             .concat_u16(self.timezone)
             .concat_u16(0x00)
             .concat_u16(self.version)
-            .concat_u32(444)
+            .concat_u16(444)
+            .concat_u16(client_features)
             .concat_u32(555)
             .concat_u32(self.permission_id)
             .concat_u32(0x00)
             .concat_u32(0x00)
             .concat_u32(0x00)
+    }
+}
+
+// 0x0B
+pub struct SubspaceExeRequestMessage {}
+
+impl Serialize for SubspaceExeRequestMessage {
+    fn serialize(&self) -> Packet {
+        Packet::empty().concat_u8(0x0B)
     }
 }
 
@@ -296,6 +385,98 @@ pub struct NewsRequestMessage {}
 impl Serialize for NewsRequestMessage {
     fn serialize(&self) -> Packet {
         Packet::empty().concat_u8(0x0D)
+    }
+}
+
+// 0x0E
+pub struct SendVoiceMessage {
+    pub index: u8,
+    pub player_id: PlayerId,
+    pub data: Vec<u8>,
+}
+
+impl Serialize for SendVoiceMessage {
+    fn serialize(&self) -> Packet {
+        Packet::empty()
+            .concat_u8(0x0E)
+            .concat_u8(self.index)
+            .concat_u16(self.player_id.value)
+            .concat_bytes(&self.data[..])
+    }
+}
+
+// 0x0F
+pub struct FrequencyChangeMessage {
+    pub frequency: u16,
+}
+
+impl Serialize for FrequencyChangeMessage {
+    fn serialize(&self) -> Packet {
+        Packet::empty().concat_u8(0x0F).concat_u16(self.frequency)
+    }
+}
+
+// 0x10
+pub struct AttachRequestMessage {
+    pub player_id: PlayerId,
+}
+
+impl Serialize for AttachRequestMessage {
+    fn serialize(&self) -> Packet {
+        Packet::empty()
+            .concat_u8(0x10)
+            .concat_u16(self.player_id.value)
+    }
+}
+
+// 0x13
+pub struct FlagRequestMessage {
+    pub flag_id: u16,
+}
+
+impl Serialize for FlagRequestMessage {
+    fn serialize(&self) -> Packet {
+        Packet::empty().concat_u8(0x13).concat_u16(self.flag_id)
+    }
+}
+
+// 0x14
+pub struct DetachAllRequestMessage {}
+
+impl Serialize for DetachAllRequestMessage {
+    fn serialize(&self) -> Packet {
+        Packet::empty().concat_u8(0x14)
+    }
+}
+
+// 0x15
+pub struct DropFlagsMessage {}
+
+impl Serialize for DropFlagsMessage {
+    fn serialize(&self) -> Packet {
+        Packet::empty().concat_u8(0x15)
+    }
+}
+
+// 0x16
+pub struct SendFileMessage<'a> {
+    pub filename: String,
+    pub data: &'a [u8],
+}
+
+impl<'a> SendFileMessage<'a> {
+    pub fn serialize(&self, out: &mut [u8]) {
+        out[0] = 0x16;
+        let mut name_len = self.filename.len();
+        if name_len > 16 {
+            name_len = 16;
+        }
+
+        for i in 0..name_len {
+            out[i + 1] = self.filename.as_bytes()[i];
+        }
+
+        out[17..self.data.len() + 17].copy_from_slice(self.data);
     }
 }
 
@@ -368,6 +549,30 @@ impl RegistrationFormMessage {
     }
 }
 
+// 0x18
+pub struct RequestShipMessage {
+    pub ship: Ship,
+}
+
+impl Serialize for RequestShipMessage {
+    fn serialize(&self) -> Packet {
+        Packet::empty()
+            .concat_u8(0x18)
+            .concat_u8(self.ship.network_value())
+    }
+}
+
+// 0x19
+pub struct SetBannerMessage<'a> {
+    pub data: &'a [u8; 96],
+}
+
+impl<'a> Serialize for SetBannerMessage<'a> {
+    fn serialize(&self) -> Packet {
+        Packet::empty().concat_u8(0x19).concat_bytes(self.data)
+    }
+}
+
 // 0x1A
 pub struct SecurityMessage {
     pub weapon_count: u32,
@@ -432,5 +637,191 @@ impl Serialize for SecurityMessage {
             .concat_u16(self.ping_low)
             .concat_u16(self.ping_high)
             .concat_u8(slow_frame)
+    }
+}
+
+#[derive(Copy, Clone)]
+pub enum SecurityViolation {
+    Ok = 0,
+    SlowFramerate,
+    CurrentEnergyOverflow,
+    TopEnergyOverflow,
+    UnprizedMaxEnergy,
+    TopRechargeOverflow,
+    UnprizedMaxRecharge,
+    BurstOveruse,
+    RepelOveruse,
+    DecoyOveruse,
+    ThorOveruse,
+    BrickOveruse,
+    UnprizedStealth,
+    UnprizedCloak,
+    UnprizedXRadar,
+    UnprizedAntiwarp,
+    UnprizedProximity,
+    UnprizedBouncingBullets,
+    UnprizedMaxGuns,
+    UnprizedMaxBombs,
+    SuperShieldOveruse,
+    SavedShipItems,
+    SavedShipWeapons,
+    LoginChecksum,
+    Unknown,
+    SavedShipChecksum,
+    Softice,
+    DataChecksum,
+    ParameterMismatch,
+    UnknownIntegrity,
+    HighLatency = 0x3C,
+}
+
+// 0x1B
+pub struct SecurityViolationMessage {
+    pub violation: SecurityViolation,
+}
+
+impl Serialize for SecurityViolationMessage {
+    fn serialize(&self) -> Packet {
+        Packet::empty()
+            .concat_u8(0x1B)
+            .concat_u8(self.violation as u8)
+    }
+}
+
+// 0x1C
+pub struct DropBrickMessage {
+    pub x: u16,
+    pub y: u16,
+}
+
+impl Serialize for DropBrickMessage {
+    fn serialize(&self) -> Packet {
+        Packet::empty()
+            .concat_u8(0x1C)
+            .concat_u16(self.x)
+            .concat_u16(self.y)
+    }
+}
+
+// 0x1D
+pub struct ChangeArenaSettingsMessage<'a> {
+    // Key is 'Category:Key', value is any value stored as a string.
+    pub changes: &'a HashMap<String, String>,
+}
+
+impl<'a> ChangeArenaSettingsMessage<'a> {
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut out = vec![];
+
+        // Type byte plus 2 bytes for ending null bytes indicating packet end
+        let mut out_size = 1 + 2;
+
+        for (key, value) in self.changes {
+            out_size += key.len() + value.len() + 2;
+        }
+
+        out.resize(out_size, 0);
+
+        out[0] = 0x1D;
+        let mut current = &mut out[1..];
+
+        for (key, value) in self.changes {
+            let self_size = key.len() + value.len() + 2;
+
+            current[..key.len()].copy_from_slice(key.as_bytes());
+            current[key.len()] = b':';
+            current[key.len() + 1..key.len() + 1 + value.len()].copy_from_slice(value.as_bytes());
+
+            current[self_size] = 0;
+
+            current = &mut current[self_size..];
+        }
+
+        out
+    }
+}
+
+// 0x1E
+pub struct KothEndMessage {}
+
+impl Serialize for KothEndMessage {
+    fn serialize(&self) -> Packet {
+        Packet::empty().concat_u8(0x1E)
+    }
+}
+
+// 0x1F
+pub struct PowerballFireMessage {
+    pub ball_id: u8,
+    pub x: u16,
+    pub y: u16,
+    pub x_velocity: i16,
+    pub y_velocity: i16,
+    pub player_id: PlayerId,
+    pub timestamp: ServerTick,
+}
+
+impl Serialize for PowerballFireMessage {
+    fn serialize(&self) -> Packet {
+        Packet::empty()
+            .concat_u8(0x1F)
+            .concat_u8(self.ball_id)
+            .concat_u16(self.x)
+            .concat_u16(self.y)
+            .concat_i16(self.x_velocity)
+            .concat_i16(self.y_velocity)
+            .concat_u16(self.player_id.value)
+            .concat_u32(self.timestamp.value())
+    }
+}
+
+// 0x20
+pub struct PowerballRequestMessage {
+    pub ball_id: u8,
+    pub timestamp: ServerTick,
+}
+
+impl Serialize for PowerballRequestMessage {
+    fn serialize(&self) -> Packet {
+        Packet::empty()
+            .concat_u8(0x20)
+            .concat_u8(self.ball_id)
+            .concat_u32(self.timestamp.value())
+    }
+}
+
+// 0x21
+pub struct PowerballScoreMessage {
+    pub ball_id: u8,
+    pub timestamp: ServerTick,
+}
+
+impl Serialize for PowerballScoreMessage {
+    fn serialize(&self) -> Packet {
+        Packet::empty()
+            .concat_u8(0x21)
+            .concat_u8(self.ball_id)
+            .concat_u32(self.timestamp.value())
+    }
+}
+
+// 0x22
+pub struct SecurityViolationExtMessage {
+    pub unknown: u32,
+    pub settings_checksum: u32,
+    pub code_checksum1: u32,
+    pub code_checksum2: u32,
+    pub violation: SecurityViolation,
+}
+
+impl Serialize for SecurityViolationExtMessage {
+    fn serialize(&self) -> Packet {
+        Packet::empty()
+            .concat_u8(0x22)
+            .concat_u32(self.unknown)
+            .concat_u32(self.settings_checksum)
+            .concat_u32(self.code_checksum1)
+            .concat_u32(self.code_checksum2)
+            .concat_u8(self.violation as u8)
     }
 }
